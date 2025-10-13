@@ -251,6 +251,15 @@ def detect_default_paths() -> dict:
             base = os.path.join(store_root, c, "LocalCache", "Roaming", "ChatGPT")
             if not paths.get("base") and os.path.isdir(base):
                 paths["base"] = base
+            if os.path.isdir(base):
+                try:
+                    package_root = str(Path(base).parent.parent.parent)
+                    try_set_dir("package_root", package_root)
+                    try_set_file("settings", os.path.join(package_root, "Settings", "settings.dat"))
+                except Exception:
+                    pass
+                try_set_dir("cache_data", os.path.join(base, "Cache", "Cache_Data"))
+                try_set_dir("code_cache", os.path.join(base, "Code Cache"))
             idx = os.path.join(base, "IndexedDB")
             ses = os.path.join(base, "Session Storage")
             lg = os.path.join(base, "Logs")
@@ -280,16 +289,6 @@ def detect_default_paths() -> dict:
             try_set_file("config", os.path.join(base, "config.json"))
             try_set_file("local_state", os.path.join(base, "Local State"))
             try_set_file("preferences", os.path.join(base, "Preferences"))
-            try_set_dir("cache_data", os.path.join(base, "Cache", "Cache_Data"))
-            try_set_dir("code_cache", os.path.join(base, "Code Cache"))
-            if os.path.isdir(base):
-                try:
-                    package_root = Path(base).parent.parent.parent
-                except ValueError:
-                    package_root = None
-                if package_root and package_root.exists():
-                    try_set_dir("package_root", str(package_root))
-                    try_set_file("settings", str(package_root / "Settings" / "settings.dat"))
             if all(paths.get(k) for k in ("indexeddb", "session", "logs", "localstorage", "network", "sentry")):
                 break
     # Classic EXE
@@ -378,6 +377,10 @@ def autodetect_from_root(root: str) -> dict:
         "quota_manager": "",
         "dips": "",
         "privateaggregation": "",
+        "cache_data": "",
+        "code_cache": "",
+        "settings": "",
+        "package_root": "",
         "base": "",
     }
     if not root or not os.path.isdir(root):
@@ -425,10 +428,12 @@ def autodetect_from_root(root: str) -> dict:
             found["preferences"] = lowered_files["preferences"]
         if "sharedstorage" in lowered_files and not found["sharedstorage"]:
             found["sharedstorage"] = lowered_files["sharedstorage"]
-        if "quotaManager".lower() in lowered_files and not found["quota_manager"]:
+        if "quotamanager" in lowered_files and not found["quota_manager"]:
             found["quota_manager"] = lowered_files["quotamanager"]
         if "dips" in lowered_files and not found["dips"]:
             found["dips"] = lowered_files["dips"]
+        if "settings.dat" in lowered_files and not found["settings"]:
+            found["settings"] = lowered_files["settings.dat"]
         # Short-circuit if all found
         essential = ("indexeddb", "session", "logs", "localstorage")
         if all(found.get(k) for k in essential):

@@ -152,6 +152,9 @@ class InspectorApp(tk.Tk):
         self.tab_storage = ttk.Frame(self.nb); self.nb.add(self.tab_storage, text="Speicher (SQLite)")
         self._build_tab_structured(self.tab_storage, which="storage")
 
+        self.tab_install = ttk.Frame(self.nb); self.nb.add(self.tab_install, text="Installation")
+        self._build_tab_structured(self.tab_install, which="install")
+
         self.tab_registry = ttk.Frame(self.nb); self.nb.add(self.tab_registry, text="Registrierung")
         self._build_tab_structured(self.tab_registry, which="registry")
 
@@ -800,7 +803,7 @@ class InspectorApp(tk.Tk):
                     self._add_structured_item(items, base_label, matches[0], kind="registry")
         return items
 
-    def _add_structured_item(self, items, label: str, path: str, allow_directory: bool = False, kind: str = "file"):
+    def _add_structured_item(self, items, label: str, path: str, allow_directory: bool = False, kind: str = "file", max_entries: Optional[int] = None):
         if not path:
             return
         if kind == "registry":
@@ -813,7 +816,9 @@ class InspectorApp(tk.Tk):
                 entries = sorted(os.listdir(path))
             except Exception:
                 entries = []
-            for name in entries:
+            for idx, name in enumerate(entries):
+                if max_entries is not None and idx >= max_entries:
+                    break
                 sub_path = os.path.join(path, name)
                 if os.path.isfile(sub_path):
                     items.append({"label": f"{label}/{name}", "path": sub_path, "kind": "file"})
@@ -1160,6 +1165,51 @@ class InspectorApp(tk.Tk):
                     search_strings_in_files("[CODE CACHE - Text]", js_paths, use_extract=False)
                 else:
                     report_lines.append("[CODE CACHE - Text]\n(Verzeichnis nicht gefunden)\n\n")
+
+                install_root = self.package_root_dir.get().strip()
+                install_text_paths = []
+                install_binary_paths = []
+                if install_root and os.path.isdir(install_root):
+                    pkg = Path(install_root)
+                    for rel in [
+                        ("AppxManifest.xml", False),
+                        (("AppxMetadata", "AppxBlockMap.xml"), False),
+                        ("priconfig.xml", False),
+                        (("app", "LICENSE"), False),
+                        (("app", "LICENSES.chromium.html"), False),
+                        (("app", "version"), False),
+                    ]:
+                        parts, is_binary = (rel, False) if isinstance(rel, str) else rel
+                        if isinstance(parts, tuple):
+                            target = pkg.joinpath(*parts)
+                        else:
+                            target = pkg / parts
+                        if target.exists():
+                            install_text_paths.append(target)
+                    for rel in [
+                        ("settings", "settings.dat"),
+                    ]:
+                        target = pkg.joinpath(*rel)
+                        if target.exists():
+                            install_text_paths.append(target)
+                    for rel in [
+                        (("app", "resources.pak"), True),
+                        (("app", "resources", "app.asar"), True),
+                        (("app", "snapshot_blob.bin"), True),
+                        (("app", "v8_context_snapshot.bin"), True),
+                    ]:
+                        parts, _ = rel
+                        target = pkg.joinpath(*parts)
+                        if target.exists():
+                            install_binary_paths.append(target)
+                if install_text_paths:
+                    search_strings_in_files("[INSTALLATION - Text]", install_text_paths, use_extract=False)
+                else:
+                    report_lines.append("[INSTALLATION - Text]\n(keine Dateien gefunden)\n\n")
+                if install_binary_paths:
+                    search_strings_in_files("[INSTALLATION - Strings]", install_binary_paths, use_extract=True, max_mb=6)
+                else:
+                    report_lines.append("[INSTALLATION - Strings]\n(keine Dateien gefunden)\n\n")
 
                 network_dir = self.network_dir.get().strip()
                 if network_dir and os.path.isdir(network_dir):
