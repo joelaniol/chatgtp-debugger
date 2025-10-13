@@ -4,7 +4,7 @@ import sqlite3
 import threading
 import winreg
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -45,6 +45,9 @@ class InspectorApp(tk.Tk):
         self.code_cache_dir = tk.StringVar(value=defaults.get("code_cache",""))
         self.settings_file = tk.StringVar(value=defaults.get("settings",""))
         self.package_root_dir = tk.StringVar(value=defaults.get("package_root",""))
+        self.exe_path_file = tk.StringVar(value=defaults.get("exe_path",""))
+        self.app_dir = tk.StringVar(value=defaults.get("app_dir",""))
+        self.resources_dir = tk.StringVar(value=defaults.get("resources_dir",""))
         self.base_dir = tk.StringVar(value=defaults.get("base",""))
         self._registry_defs = [
             ("reg_app_path", "Registry App Path", "HKCU", r"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chatgpt.exe", None, False),
@@ -69,6 +72,7 @@ class InspectorApp(tk.Tk):
         self.ls_minlen_var = self.ls_utf16_var = self.ls_maxmb_var = None
         self.telemetry_text = None
         self.struct_views = {}
+        self.path_display_labels = {}
 
         self._build_ui()
         Path(DEFAULT_EXPORT_DIR).mkdir(exist_ok=True)
@@ -181,11 +185,14 @@ class InspectorApp(tk.Tk):
             ("sharedstorage", "SharedStorage", self.sharedstorage_file, "file"),
             ("quota_manager", "QuotaManager", self.quota_manager_file, "file"),
             ("dips", "DIPS", self.dips_file, "file"),
-            ("privateaggregation", "PrivateAggregation", self.privateaggregation_dir, "dir"),
+            ("privateaggregation", "PrivateAggregation", self.privateaggregation_dir, "file"),
             ("cache_data", "Cache Data", self.cache_data_dir, "dir"),
             ("code_cache", "Code Cache", self.code_cache_dir, "dir"),
             ("settings", "settings.dat", self.settings_file, "file"),
             ("package_root", "Package Root", self.package_root_dir, "dir"),
+            ("exe_path", "ChatGPT.exe", self.exe_path_file, "file"),
+            ("app_dir", "App Ordner", self.app_dir, "dir"),
+            ("resources_dir", "Resources", self.resources_dir, "dir"),
         ]
         for key, label, *_rest in self._registry_defs:
             entries.append((key, label, self.registry_vars[key], "registry"))
@@ -197,11 +204,13 @@ class InspectorApp(tk.Tk):
     def _update_path_summary(self):
         found = 0
         missing = 0
-        for key, label, var, _kind in self._path_entries():
+        entries = list(self._path_entries())
+        entries_map = {k: var for k, _, var, _ in entries}
+        for key, label, _var, _kind in entries:
             summary_lbl = self.path_summary_labels.get(key)
             if not summary_lbl:
                 continue
-            path = var.get().strip()
+            path = entries_map[key].get().strip()
             if path:
                 summary_lbl.config(text="Gefunden", fg="#1f7f37")
                 found += 1
@@ -212,13 +221,105 @@ class InspectorApp(tk.Tk):
             self.summary_found_var.set(f"Gefunden: {found}")
         if hasattr(self, "summary_missing_var"):
             self.summary_missing_var.set(f"Nicht gefunden: {missing}")
+        self._update_path_displays(entries_map)
 
     def _refresh_registry_sources(self):
         for key, _label, root_name, base_path, pattern, multi in self._registry_defs:
             matches = self._list_registry_matches(root_name, base_path, pattern, multi)
             value = matches[0] if matches else ""
             self.registry_vars[key].set(value)
+        self._update_install_paths_from_registry()
         self._update_path_summary()
+
+    def _update_install_paths_from_registry(self):
+        entries_map = {k: var for k, _, var, _ in self._path_entries()}
+        reg_var = self.registry_vars.get("reg_app_path")
+        reg_value = reg_var.get().strip() if reg_var else ""
+        exe_path: Optional[Path] = None
+        app_dir_path: Optional[Path] = None
+        pkg_root: Optional[Path] = None
+
+        if reg_value:
+            split = self._split_registry_path(reg_value)
+            if split:
+                root, sub_path = split
+                try:
+                    with winreg.OpenKey(root, sub_path, 0, winreg.KEY_READ) as key:
+                        exe_str = self._read_registry_string_value(key, None)
+                        if exe_str and os.path.isfile(exe_str):
+                            exe_path = Path(exe_str)
+                        app_dir_str = self._read_registry_string_value(key, "Path")
+                        if app_dir_str and os.path.isdir(app_dir_str):
+                            app_dir_path = Path(app_dir_str)
+                except OSError:
+                    pass
+
+        if exe_path is not None:
+            self.exe_path_file.set(str(exe_path))
+            app_dir_path = exe_path.parent
+
+        if app_dir_path is not None:
+            self.app_dir.set(str(app_dir_path))
+            resources_candidate = app_dir_path / "resources"
+            if resources_candidate.exists():
+                self.resources_dir.set(str(resources_candidate))
+            pkg_root = app_dir_path.parent
+            exe_candidate = app_dir_path / "ChatGPT.exe"
+            if exe_candidate.exists() and not self.exe_path_file.get().strip():
+                self.exe_path_file.set(str(exe_candidate))
+
+        if pkg_root is None and exe_path is not None:
+            pkg_root = exe_path.parent.parent
+
+        if pkg_root and pkg_root.exists():
+            root_str = str(pkg_root)
+            if self.package_root_dir.get().strip() != root_str:
+                self.package_root_dir.set(root_str)
+            settings_path = pkg_root / "Settings" / "settings.dat"
+            if settings_path.exists():
+                self.settings_file.set(str(settings_path))
+            if not self.app_dir.get().strip():
+                app_candidate = pkg_root / "app"
+                if app_candidate.exists():
+                    self.app_dir.set(str(app_candidate))
+            if not self.resources_dir.get().strip():
+                resources_candidate = pkg_root / "app" / "resources"
+                if resources_candidate.exists():
+                    self.resources_dir.set(str(resources_candidate))
+            if not self.exe_path_file.get().strip():
+                exe_candidate = pkg_root / "app" / "ChatGPT.exe"
+                if exe_candidate.exists():
+                    self.exe_path_file.set(str(exe_candidate))
+
+        base_path = self.base_dir.get().strip()
+        if base_path:
+            base = Path(base_path)
+            cache = base / "Cache" / "Cache_Data"
+            if cache.exists():
+                self.cache_data_dir.set(str(cache))
+            code_cache = base / "Code Cache"
+            if code_cache.exists():
+                self.code_cache_dir.set(str(code_cache))
+        self._update_path_displays(entries_map)
+
+    @staticmethod
+    def _shorten_path(path: str, limit: int = 60) -> str:
+        if len(path) <= limit:
+            return path
+        return "..." + path[-(limit-3):] if limit > 3 else path[:limit]
+
+    def _update_path_displays(self, entries_map: Optional[dict] = None):
+        if not getattr(self, "path_display_labels", None):
+            return
+        if entries_map is None:
+            entries_map = {k: var for k, _, var, _ in self._path_entries()}
+        for key, label_widget in self.path_display_labels.items():
+            var = entries_map.get(key)
+            if var is None:
+                continue
+            value = var.get().strip()
+            short = self._shorten_path(value) if value else "-"
+            label_widget.config(text=short)
 
     def toggle_summary_details(self, force: Optional[bool] = None):
         show = not getattr(self, "summary_details_visible", False)
@@ -242,27 +343,35 @@ class InspectorApp(tk.Tk):
             return
         win = tk.Toplevel(self)
         win.title("Erweiterte Pfade")
-        win.geometry("780x420")
-        win.resizable(False, False)
+        win.geometry("820x460")
+        win.minsize(720, 320)
+        win.resizable(True, True)
         self._paths_dialog = win
 
         body = ttk.Frame(win); body.pack(fill="both", expand=True, padx=12, pady=12)
-        for key, label, var, kind in self._path_entries():
-            row = ttk.Frame(body); row.pack(fill="x", pady=2)
-            ttk.Label(row, text=f"{label}:").pack(side="left")
-            if kind == "registry":
-                entry = ttk.Entry(row, textvariable=var, width=70, state="readonly")
-                entry.pack(side="left", fill="x", expand=True, padx=6)
-                continue
-            entry = ttk.Entry(row, textvariable=var, width=70)
-            entry.pack(side="left", fill="x", expand=True, padx=6)
-            entry.bind("<Return>", lambda _e: self._on_paths_changed(rescan=True))
-            entry.bind("<KP_Enter>", lambda _e: self._on_paths_changed(rescan=True))
+        content = ttk.Frame(body); content.pack(fill="both", expand=True)
+        content.grid_columnconfigure(1, weight=1)
+        self.path_display_labels = {}
+
+        for idx, (key, label, var, kind) in enumerate(self._path_entries()):
+            ttk.Label(content, text=f"{label}:").grid(row=idx, column=0, sticky="w", padx=(0,6), pady=2)
+            short_val = self._shorten_path(var.get().strip()) if var.get().strip() else "-"
+            display = ttk.Label(content, text=short_val, anchor="w")
+            display.grid(row=idx, column=1, sticky="ew", pady=2)
+            self.path_display_labels[key] = display
             ttk.Button(
-                row,
-                text="Auswaehlen",
-                command=lambda v=var, k=kind: self._choose_path(v, lambda: self._on_paths_changed(rescan=True), kind=k)
-            ).pack(side="left")
+                content,
+                text="Details",
+                command=lambda v=var, lbl=label: self.show_path_detail(lbl, v.get().strip())
+            ).grid(row=idx, column=2, padx=4, pady=2)
+            if kind != "registry":
+                ttk.Button(
+                    content,
+                    text="Auswaehlen",
+                    command=lambda v=var, k=kind: self._choose_path(v, lambda: self._on_paths_changed(rescan=True), kind=k)
+                ).grid(row=idx, column=3, padx=4, pady=2)
+
+        self._update_path_displays()
 
         buttons = ttk.Frame(body); buttons.pack(fill="x", pady=(10,0))
         ttk.Button(buttons, text="Auto finden (alle)", command=lambda: self.auto_find_all(force=True)).pack(side="left")
@@ -288,6 +397,17 @@ class InspectorApp(tk.Tk):
 
     def _choose_dir(self, var, on_change=None):
         self._choose_path(var, on_change=on_change, kind="dir")
+
+    def show_path_detail(self, label: str, value: str):
+        if not value:
+            messagebox.showinfo("Pfad", f"{label}: [leer]")
+            return
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(value)
+        except Exception:
+            pass
+        messagebox.showinfo("Pfad kopiert", f"{label}:\n{value}\n\n(Pfad wurde in die Zwischenablage kopiert.)")
 
     def scan_all(self):
         self._refresh_registry_sources()
@@ -789,7 +909,7 @@ class InspectorApp(tk.Tk):
                 self._add_structured_item(items, label, path)
             pa_dir = self.privateaggregation_dir.get().strip()
             if pa_dir:
-                self._add_structured_item(items, "PrivateAggregation", pa_dir, allow_directory=True)
+                self._add_structured_item(items, "PrivateAggregation", pa_dir, allow_directory=False)
         elif which == "registry":
             for key, base_label, root_name, base_path, pattern, multi in self._registry_defs:
                 matches = self._list_registry_matches(root_name, base_path, pattern, multi)
@@ -898,6 +1018,32 @@ class InspectorApp(tk.Tk):
             winreg.REG_NONE: "REG_NONE",
         }
         return mapping.get(value_type, f"TYPE_{value_type}")
+
+    def _split_registry_path(self, path: str) -> Optional[Tuple[int, str]]:
+        if not path:
+            return None
+        parts = path.split("\\", 1)
+        if len(parts) != 2:
+            return None
+        roots = self._registry_roots()
+        root = roots.get(parts[0].upper())
+        if not root:
+            return None
+        return root, parts[1]
+
+    @staticmethod
+    def _read_registry_string_value(key, value_name: Optional[str]) -> str:
+        try:
+            raw, value_type = winreg.QueryValueEx(key, value_name)
+        except FileNotFoundError:
+            return ""
+        except OSError:
+            return ""
+        if isinstance(raw, str):
+            if value_type == winreg.REG_EXPAND_SZ:
+                return os.path.expandvars(raw)
+            return raw
+        return ""
 
     def _list_registry_matches(self, root_name: str, base_path: str, pattern: Optional[str], multi: bool) -> List[str]:
         roots = self._registry_roots()
@@ -1259,5 +1405,14 @@ class InspectorApp(tk.Tk):
 if __name__ == "__main__":
     app = InspectorApp()
     app.mainloop()
+
+
+
+
+
+
+
+
+
 
 

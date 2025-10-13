@@ -5,6 +5,11 @@ from pathlib import Path
 from typing import Tuple, List, Optional, Iterable
 
 try:
+    import winreg  # type: ignore
+except ImportError:  # pragma: no cover - non-Windows
+    winreg = None  # type: ignore
+
+try:
     import chardet  # type: ignore
 except Exception:
     chardet = None  # optional
@@ -229,6 +234,9 @@ def detect_default_paths() -> dict:
         "code_cache": "",
         "settings": "",
         "package_root": "",
+        "exe_path": "",
+        "app_dir": "",
+        "resources_dir": "",
         "base": "",
     }
 
@@ -238,6 +246,10 @@ def detect_default_paths() -> dict:
 
     def try_set_file(key: str, path: str):
         if path and not paths.get(key) and os.path.isfile(path):
+            paths[key] = path
+
+    def try_set_path(key: str, path: str):
+        if path and not paths.get(key) and os.path.exists(path):
             paths[key] = path
 
     la = os.getenv("LOCALAPPDATA", "")
@@ -256,6 +268,9 @@ def detect_default_paths() -> dict:
                     package_root = str(Path(base).parent.parent.parent)
                     try_set_dir("package_root", package_root)
                     try_set_file("settings", os.path.join(package_root, "Settings", "settings.dat"))
+                    try_set_file("exe_path", os.path.join(package_root, "app", "ChatGPT.exe"))
+                    try_set_dir("app_dir", os.path.join(package_root, "app"))
+                    try_set_dir("resources_dir", os.path.join(package_root, "app", "resources"))
                 except Exception:
                     pass
                 try_set_dir("cache_data", os.path.join(base, "Cache", "Cache_Data"))
@@ -285,7 +300,7 @@ def detect_default_paths() -> dict:
             try_set_file("sharedstorage", shared_storage)
             try_set_file("quota_manager", os.path.join(webstorage, "QuotaManager"))
             try_set_file("dips", dips_file)
-            try_set_dir("privateaggregation", private_aggregation)
+            try_set_path("privateaggregation", private_aggregation)
             try_set_file("config", os.path.join(base, "config.json"))
             try_set_file("local_state", os.path.join(base, "Local State"))
             try_set_file("preferences", os.path.join(base, "Preferences"))
@@ -319,7 +334,7 @@ def detect_default_paths() -> dict:
         try_set_file("sharedstorage", shared_storage2)
         try_set_file("quota_manager", os.path.join(webstorage2, "QuotaManager"))
         try_set_file("dips", dips2)
-        try_set_dir("privateaggregation", private_aggregation2)
+        try_set_path("privateaggregation", private_aggregation2)
         try_set_file("config", os.path.join(classic, "config.json"))
         try_set_file("local_state", os.path.join(classic, "Local State"))
         try_set_file("preferences", os.path.join(classic, "Preferences"))
@@ -327,6 +342,9 @@ def detect_default_paths() -> dict:
         try_set_dir("code_cache", os.path.join(classic, "Code Cache"))
         try_set_file("settings", os.path.join(classic, "Settings", "settings.dat"))
         try_set_dir("package_root", classic)
+        try_set_file("exe_path", os.path.join(classic, "app", "ChatGPT.exe"))
+        try_set_dir("app_dir", os.path.join(classic, "app"))
+        try_set_dir("resources_dir", os.path.join(classic, "app", "resources"))
 
     if paths.get("base"):
         base_path = Path(paths["base"])
@@ -337,8 +355,62 @@ def detect_default_paths() -> dict:
         if package_root and package_root.exists():
             try_set_dir("package_root", str(package_root))
             try_set_file("settings", str(package_root / "Settings" / "settings.dat"))
+            try_set_file("exe_path", str(package_root / "app" / "ChatGPT.exe"))
+            try_set_dir("app_dir", str(package_root / "app"))
+            try_set_dir("resources_dir", str(package_root / "app" / "resources"))
         try_set_dir("cache_data", os.path.join(paths["base"], "Cache", "Cache_Data"))
         try_set_dir("code_cache", os.path.join(paths["base"], "Code Cache"))
+
+    if winreg is not None:
+        exe_from_reg = ""
+        app_dir_from_reg = ""
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\App Paths\ChatGPT.exe",
+                0,
+                winreg.KEY_READ,
+            ) as key:
+                def read_registry_string(name: Optional[str]) -> str:
+                    try:
+                        raw, value_type = winreg.QueryValueEx(key, name)
+                    except FileNotFoundError:
+                        return ""
+                    except OSError:
+                        return ""
+                    if isinstance(raw, str):
+                        if value_type == winreg.REG_EXPAND_SZ:
+                            return os.path.expandvars(raw)
+                        return raw
+                    return ""
+
+                exe_from_reg = read_registry_string(None)
+                app_dir_from_reg = read_registry_string("Path")
+        except OSError:
+            exe_from_reg = ""
+            app_dir_from_reg = ""
+        if exe_from_reg and os.path.isfile(exe_from_reg):
+            paths["exe_path"] = exe_from_reg
+            exe_parent = Path(exe_from_reg).parent
+            paths["app_dir"] = str(exe_parent)
+            resources_candidate = exe_parent / "resources"
+            if resources_candidate.exists():
+                paths["resources_dir"] = str(resources_candidate)
+            pkg_candidate = exe_parent.parent
+            if pkg_candidate.exists():
+                paths["package_root"] = str(pkg_candidate)
+        if app_dir_from_reg and os.path.isdir(app_dir_from_reg):
+            paths["app_dir"] = app_dir_from_reg
+            pkg_candidate = Path(app_dir_from_reg).parent
+            if pkg_candidate.exists():
+                paths["package_root"] = str(pkg_candidate)
+            exe_candidate = Path(app_dir_from_reg) / "ChatGPT.exe"
+            if exe_candidate.exists():
+                paths["exe_path"] = str(exe_candidate)
+            resources_candidate = Path(app_dir_from_reg) / "resources"
+            if resources_candidate.exists():
+                paths["resources_dir"] = str(resources_candidate)
+
     return paths
 
 def choose_indexeddb(indexeddb_root: str) -> Optional[str]:
@@ -381,6 +453,9 @@ def autodetect_from_root(root: str) -> dict:
         "code_cache": "",
         "settings": "",
         "package_root": "",
+        "app_dir": "",
+        "resources_dir": "",
+        "exe_path": "",
         "base": "",
     }
     if not root or not os.path.isdir(root):
@@ -412,9 +487,20 @@ def autodetect_from_root(root: str) -> dict:
         # Crashpad directory
         if bn == "crashpad" and not found["crashpad"]:
             found["crashpad"] = cur_root
-        # Private Aggregation directory
-        if bn == "privateaggregation" and not found["privateaggregation"]:
-            found["privateaggregation"] = cur_root
+        # App directory (contains ChatGPT.exe)
+        if bn == "app" and not found["app_dir"]:
+            exe_candidate = os.path.join(cur_root, "ChatGPT.exe")
+            if os.path.isfile(exe_candidate):
+                found["app_dir"] = cur_root
+                found["exe_path"] = exe_candidate
+                pkg_candidate = str(Path(cur_root).parent)
+                if pkg_candidate and not found["package_root"]:
+                    found["package_root"] = pkg_candidate
+        # Resources directory
+        if bn == "resources" and not found["resources_dir"]:
+            app_asar = os.path.join(cur_root, "app.asar")
+            if os.path.exists(app_asar):
+                found["resources_dir"] = cur_root
         # IndexedDB candidate folders
         if bn.endswith(".indexeddb.leveldb") and not found["indexeddb"]:
             found["indexeddb"] = cur_root
@@ -434,6 +520,20 @@ def autodetect_from_root(root: str) -> dict:
             found["dips"] = lowered_files["dips"]
         if "settings.dat" in lowered_files and not found["settings"]:
             found["settings"] = lowered_files["settings.dat"]
+        if "chatgpt.exe" in lowered_files and not found["exe_path"]:
+            exe_path = lowered_files["chatgpt.exe"]
+            found["exe_path"] = exe_path
+            app_candidate = str(Path(exe_path).parent)
+            if app_candidate and not found["app_dir"]:
+                found["app_dir"] = app_candidate
+            pkg_candidate = str(Path(exe_path).parent.parent)
+            if pkg_candidate and not found["package_root"]:
+                found["package_root"] = pkg_candidate
+            resources_candidate = Path(exe_path).parent / "resources"
+            if resources_candidate.exists() and not found["resources_dir"]:
+                found["resources_dir"] = str(resources_candidate)
+        if "privateaggregation" in lowered_files and not found["privateaggregation"]:
+            found["privateaggregation"] = lowered_files["privateaggregation"]
         # Short-circuit if all found
         essential = ("indexeddb", "session", "logs", "localstorage")
         if all(found.get(k) for k in essential):
@@ -457,3 +557,4 @@ def search_lines(lines: Iterable[str], patterns: List[str]) -> List[str]:
                 res.append(f"{i:06d}: {ln.rstrip()}".rstrip())
                 break
     return res
+

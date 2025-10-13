@@ -1,0 +1,6 @@
+*** Begin Patch
+*** Update File: app.py
+@@
+-        self._update_path_displays(entries_map)
++        self._update_path_displays(entries_map)
+*** End Patch
