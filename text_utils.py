@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from pathlib import Path
@@ -19,6 +20,76 @@ def _sanitize_extracted_string(s: str) -> str:
     while "\n\n\n" in s:
         s = s.replace("\n\n\n", "\n\n")
     return s.strip()
+
+def _format_json_if_possible(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return text
+    if not ((stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]"))):
+        return text
+    try:
+        obj = json.loads(stripped)
+        return json.dumps(obj, indent=2, ensure_ascii=False)
+    except Exception:
+        return text
+
+def _brace_delta(text: str) -> int:
+    delta = 0
+    in_string = False
+    quote_char = ""
+    escape = False
+    for ch in text:
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote_char:
+                in_string = False
+        else:
+            if ch in ("\"", "'"):
+                in_string = True
+                quote_char = ch
+            elif ch in "{[":
+                delta += 1
+            elif ch in "]}":
+                delta -= 1
+    return delta
+
+def _merge_json_chunks(strings: List[str]) -> List[str]:
+    merged: List[str] = []
+    buffer: List[str] = []
+    depth = 0
+    for s in strings:
+        trimmed = s.lstrip()
+        if not buffer and trimmed.startswith(("{", "[")):
+            buffer = [s]
+            depth = _brace_delta(s)
+            if depth <= 0:
+                joined = "\n".join(buffer)
+                merged.append(_format_json_if_possible(joined))
+                buffer = []
+                depth = 0
+            continue
+        if buffer:
+            buffer.append(s)
+            depth += _brace_delta(s)
+            if depth <= 0:
+                joined = "\n".join(buffer)
+                merged.append(_format_json_if_possible(joined))
+                buffer = []
+                depth = 0
+            continue
+        merged.append(_format_json_if_possible(s))
+    if buffer:
+        joined = "\n".join(buffer)
+        merged.append(_format_json_if_possible(joined))
+    return merged
+
+def _postprocess_strings(strings: List[str]) -> List[str]:
+    if not strings:
+        return strings
+    return _merge_json_chunks(strings)
 
 def safe_read_text(path: str, max_bytes: Optional[int] = None) -> Tuple[str, str]:
     p = Path(path)
@@ -94,14 +165,18 @@ def extract_strings_from_file(path: str, min_len: int = 8, include_utf16le: bool
             strings_all.extend(_ascii_strings_from_bytes(data, min_len))
             if include_utf16le:
                 strings_all.extend(_utf16le_strings_from_bytes(data, min_len))
+    cleaned_strings: List[str] = []
+    for s in strings_all:
+        cleaned = _sanitize_extracted_string(s)
+        if cleaned:
+            cleaned_strings.append(cleaned)
+    processed = _postprocess_strings(cleaned_strings)
     seen = set()
     unique = []
-    for s in strings_all:
+    for s in processed:
         if s not in seen:
             seen.add(s)
-            cleaned = _sanitize_extracted_string(s)
-            if cleaned:
-                unique.append(cleaned)
+            unique.append(s)
     return (total, unique)
 
 def list_candidate_files_in_leveldb(folder: str):

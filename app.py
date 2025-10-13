@@ -66,7 +66,7 @@ class InspectorApp(tk.Tk):
         ttk.Entry(row0, textvariable=self.root_dir, width=80).pack(side="left", fill="x", expand=True, padx=6)
         ttk.Button(
             row0,
-            text="Root wählen",
+            text="Root waehlen",
             command=lambda:self._choose_dir(self.root_dir, lambda: self.auto_find_all(force=True))
         ).pack(side="left")
         ttk.Button(row0, text="Auto finden (alle)", command=lambda:self.auto_find_all(force=True)).pack(side="left", padx=6)
@@ -78,18 +78,18 @@ class InspectorApp(tk.Tk):
         summary_grid.pack(fill="x", pady=(2,0))
         summary_grid.columnconfigure(1, weight=1)
 
-        self.path_summary_vars = {}
+        self.path_summary_labels = {}
         for idx, (key, label, var) in enumerate(self._path_summary_items()):
             ttk.Label(summary_grid, text=f"{label}:").grid(row=idx, column=0, sticky="w", padx=(0,6), pady=1)
-            display_var = tk.StringVar(value="")
-            self.path_summary_vars[key] = display_var
-            ttk.Label(summary_grid, textvariable=display_var, anchor="w").grid(row=idx, column=1, sticky="ew", pady=1)
+            status_label = tk.Label(summary_grid, text="-", anchor="w")
+            status_label.grid(row=idx, column=1, sticky="w", pady=1)
+            self.path_summary_labels[key] = status_label
 
         controls = ttk.Frame(top); controls.pack(fill="x", pady=(4,0))
         ttk.Button(controls, text="Erweiterte Pfade ...", command=self.open_path_manager).pack(side="left")
 
         tools = ttk.Frame(self); tools.pack(fill="x", padx=8, pady=(0,8))
-        ttk.Button(tools, text="🔎 MCP Auto‑Suche (Report)", command=self.run_mcp_auto_search).pack(side="left")
+        ttk.Button(tools, text="MCP Auto-Suche (Report)", command=self.run_mcp_auto_search).pack(side="left")
 
         self.nb = ttk.Notebook(self); self.nb.pack(fill="both", expand=True, padx=8, pady=8)
 
@@ -149,20 +149,14 @@ class InspectorApp(tk.Tk):
 
     def _update_path_summary(self):
         for key, label, var, _kind in self._path_entries():
-            summary_var = self.path_summary_vars.get(key)
-            if not summary_var:
+            summary_lbl = self.path_summary_labels.get(key)
+            if not summary_lbl:
                 continue
             path = var.get().strip()
             if path:
-                summary_var.set(f"Gefunden: {self._shorten_path(path)}")
+                summary_lbl.config(text="Gefunden", fg="#1f7f37")
             else:
-                summary_var.set("Nicht gefunden")
-
-    @staticmethod
-    def _shorten_path(path: str, limit: int = 80) -> str:
-        if len(path) <= limit:
-            return path
-        return "..." + path[-(limit-3):]
+                summary_lbl.config(text="Nicht gefunden", fg="#b32424")
 
     def open_path_manager(self):
         if hasattr(self, "_paths_dialog") and self._paths_dialog.winfo_exists():
@@ -185,14 +179,14 @@ class InspectorApp(tk.Tk):
             entry.bind("<KP_Enter>", lambda _e: self._on_paths_changed(rescan=True))
             ttk.Button(
                 row,
-                text="Auswählen",
+                text="Auswaehlen",
                 command=lambda v=var, k=kind: self._choose_path(v, lambda: self._on_paths_changed(rescan=True), kind=k)
             ).pack(side="left")
 
         buttons = ttk.Frame(body); buttons.pack(fill="x", pady=(10,0))
         ttk.Button(buttons, text="Auto finden (alle)", command=lambda: self.auto_find_all(force=True)).pack(side="left")
         ttk.Button(buttons, text="Neu laden", command=self.scan_all).pack(side="left", padx=6)
-        ttk.Button(buttons, text="Schließen", command=win.destroy).pack(side="right")
+        ttk.Button(buttons, text="Schliessen", command=win.destroy).pack(side="right")
 
     def _on_paths_changed(self, rescan=False):
         self._update_path_summary()
@@ -201,9 +195,9 @@ class InspectorApp(tk.Tk):
 
     def _choose_path(self, var, on_change=None, kind="dir"):
         if kind == "file":
-            p = filedialog.askopenfilename(title="Datei auswählen")
+            p = filedialog.askopenfilename(title="Datei auswaehlen")
         else:
-            p = filedialog.askdirectory(title="Ordner auswählen")
+            p = filedialog.askdirectory(title="Ordner auswaehlen")
         if p:
             var.set(p)
             if on_change:
@@ -265,7 +259,7 @@ class InspectorApp(tk.Tk):
         ttk.Label(top, text="Suchen/Filtern:").pack(side="left")
         ttk.Entry(top, textvariable=self.log_search_var).pack(side="left", fill="x", expand=True, padx=6)
         ttk.Button(top, text="Anwenden", command=self.apply_log_filter).pack(side="left")
-        ttk.Button(top, text="Zurücksetzen", command=self.reset_log_filter).pack(side="left", padx=4)
+        ttk.Button(top, text="Zuruecksetzen", command=self.reset_log_filter).pack(side="left", padx=4)
         ttk.Button(top, text="Export Ansicht", command=self.export_log_view).pack(side="left", padx=6)
 
         mid = ttk.Frame(parent); mid.pack(fill="both", expand=True, pady=(6,0))
@@ -319,7 +313,7 @@ class InspectorApp(tk.Tk):
     # --- LevelDB-like tabs (IndexedDB / Session / LocalStorage) ---
     def _build_tab_leveldb(self, parent, which="idx"):
         top = ttk.Frame(parent); top.pack(fill="x")
-        minlen_label = ttk.Label(top, text="Min. Länge:"); minlen_label.pack(side="left")
+        minlen_label = ttk.Label(top, text="Min. Laenge:"); minlen_label.pack(side="left")
         minlen_var = tk.IntVar(value=8)
         ttk.Entry(top, textvariable=minlen_var, width=6).pack(side="left", padx=(4,10))
         utf16_var = tk.BooleanVar(value=True)
@@ -360,7 +354,7 @@ class InspectorApp(tk.Tk):
         ttk.Label(sb, text="Suchen/Filtern:").pack(side="left")
         ttk.Entry(sb, textvariable=sv).pack(side="left", fill="x", expand=True, padx=6)
         ttk.Button(sb, text="Anwenden", command=lambda:self.apply_leveldb_filter(which, sv)).pack(side="left")
-        ttk.Button(sb, text="Zurücksetzen", command=lambda:self.reset_leveldb_filter(which)).pack(side="left", padx=4)
+        ttk.Button(sb, text="Zuruecksetzen", command=lambda:self.reset_leveldb_filter(which)).pack(side="left", padx=4)
 
         tv = tk.Text(right, wrap="none")
         tv.pack(fill="both", expand=True, pady=(6,0))
@@ -375,7 +369,7 @@ class InspectorApp(tk.Tk):
         for p in self.idx_text + self.idx_bin:
             self.idx_list.insert("end", os.path.basename(p))
         self.idx_textview.delete("1.0","end")
-        self.status_var.set(f"IndexedDB: {len(self.idx_text)} Text, {len(self.idx_bin)} Binärdateien.")
+        self.status_var.set(f"IndexedDB: {len(self.idx_text)} Text, {len(self.idx_bin)} Binaerdateien.")
 
     def scan_session(self):
         folder = self.session_dir.get().strip()
@@ -384,7 +378,7 @@ class InspectorApp(tk.Tk):
         for p in self.ses_text + self.ses_bin:
             self.ses_list.insert("end", os.path.basename(p))
         self.ses_textview.delete("1.0","end")
-        self.status_var.set(f"Session Storage: {len(self.ses_text)} Text, {len(self.ses_bin)} Binärdateien.")
+        self.status_var.set(f"Session Storage: {len(self.ses_text)} Text, {len(self.ses_bin)} Binaerdateien.")
 
     def scan_localstorage(self):
         folder = self.localstorage_dir.get().strip()
@@ -393,7 +387,7 @@ class InspectorApp(tk.Tk):
         for p in self.ls_text + self.ls_bin:
             self.ls_list.insert("end", os.path.basename(p))
         self.ls_textview.delete("1.0","end")
-        self.status_var.set(f"Local Storage: {len(self.ls_text)} Text, {len(self.ls_bin)} Binärdateien.")
+        self.status_var.set(f"Local Storage: {len(self.ls_text)} Text, {len(self.ls_bin)} Binaerdateien.")
 
     def _resolve_leveldb_path(self, which, idx):
         if which == "idx":
@@ -434,7 +428,7 @@ class InspectorApp(tk.Tk):
             minlen_var, utf16_var, maxmb_var = self._leveldb_controls(which)
             if minlen_var is None:
                 tv.delete("1.0","end")
-                tv.insert("1.0", "[Binärdatei ausgewählt. Automatischer Scan nicht verfügbar.]")
+                tv.insert("1.0", "[Binaerdatei ausgewaehlt. Automatischer Scan nicht verfuegbar.]")
                 return
             self.scan_strings(which, minlen_var, utf16_var, maxmb_var)
 
@@ -455,11 +449,11 @@ class InspectorApp(tk.Tk):
         text_files = self.idx_text if which=="idx" else self.ses_text if which=="ses" else self.ls_text
         sel = lb.curselection()
         if not sel:
-            messagebox.showinfo("Export", "Keine Datei ausgewählt.")
+            messagebox.showinfo("Export", "Keine Datei ausgewaehlt.")
             return
         idx = sel[0]
         if idx >= len(text_files):
-            messagebox.showinfo("Export", "Binärdatei: Bitte 'Export Strings' benutzen.")
+            messagebox.showinfo("Export", "Binaerdatei: Bitte 'Export Strings' benutzen.")
             return
         path = self._resolve_leveldb_path(which, idx)
         enc, content = safe_read_text(path)
@@ -477,11 +471,11 @@ class InspectorApp(tk.Tk):
 
         sel = lb.curselection()
         if not sel:
-            messagebox.showinfo("Hinweis", "Bitte zuerst eine Binärdatei auswählen.")
+            messagebox.showinfo("Hinweis", "Bitte zuerst eine Binaerdatei auswaehlen.")
             return
         idx = sel[0]
         if idx < len(text_files):
-            messagebox.showinfo("Hinweis", "Textdatei ausgewählt. Bitte eine Binärdatei (.ldb/.log/.sst) wählen.")
+            messagebox.showinfo("Hinweis", "Textdatei ausgewaehlt. Bitte eine Binaerdatei (.ldb/.log/.sst) waehlen.")
             return
         path = (text_files + bin_files)[idx]
         try:
@@ -499,7 +493,7 @@ class InspectorApp(tk.Tk):
                 max_mb = None
 
         tv.delete("1.0","end")
-        tv.insert("1.0", "[Bitte warten – Strings werden extrahiert ...]")
+        tv.insert("1.0", "[Bitte warten - Strings werden extrahiert ...]")
         self.status_var.set(f"Strings in {os.path.basename(path)} ...")
 
         def worker():
@@ -523,7 +517,7 @@ class InspectorApp(tk.Tk):
         bin_files = self.idx_bin if which=="idx" else self.ses_bin if which=="ses" else self.ls_bin
         sel = lb.curselection()
         if not sel:
-            messagebox.showinfo("Export", "Keine Binärdatei ausgewählt.")
+            messagebox.showinfo("Export", "Keine Binaerdatei ausgewaehlt.")
             return
         idx = sel[0]
         if idx < len(text_files):
@@ -772,7 +766,7 @@ class InspectorApp(tk.Tk):
             conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
             conn.row_factory = sqlite3.Row
         except sqlite3.Error as ex:
-            return f"[SQLite konnte nicht geöffnet werden: {ex}]"
+            return f"[SQLite konnte nicht geoeffnet werden: {ex}]"
         try:
             tables = [
                 row["name"] if isinstance(row, sqlite3.Row) else row[0]
@@ -816,9 +810,20 @@ class InspectorApp(tk.Tk):
             except Exception:
                 pass
 
+    def _read_file_for_search(self, path: str) -> str:
+        if not path or not os.path.exists(path):
+            return ""
+        if self._is_sqlite(path):
+            return self._preview_sqlite(path, row_limit=100)
+        try:
+            _, content = safe_read_text(path, max_bytes=2 * 1024 * 1024)
+            return content
+        except Exception:
+            return ""
+
     def _export_text_widget(self, widget, filename: str):
         if widget is None:
-            messagebox.showinfo("Export", "Keine Ansicht ausgewählt.")
+            messagebox.showinfo("Export", "Keine Ansicht ausgewaehlt.")
             return
         data = widget.get("1.0","end")
         if not data.strip():
@@ -831,8 +836,8 @@ class InspectorApp(tk.Tk):
     # --- MCP Auto-Search ---
     def run_mcp_auto_search(self):
         out_path = Path(DEFAULT_EXPORT_DIR) / "mcp_report.txt"
-        self.status_var.set("MCP-Auto-Suche läuft ...")
-        messagebox.showinfo("MCP Auto‑Suche", "Die Suche läuft im Hintergrund. Das Ergebnis wird in 'outputs/mcp_report.txt' gespeichert.")
+        self.status_var.set("MCP Auto-Suche laeuft ...")
+        messagebox.showinfo("MCP Auto-Suche", "Die Suche laeuft im Hintergrund. Das Ergebnis wird in 'outputs/mcp_report.txt' gespeichert.")
 
         logs_dir = self.logs_dir.get().strip()
         idx_dir = self.indexeddb_dir.get().strip()
@@ -842,7 +847,7 @@ class InspectorApp(tk.Tk):
         def worker():
             try:
                 report_lines = []
-                report_lines.append("=== ChatGPT Desktop Inspector – MCP Auto‑Suche ===\n")
+                report_lines.append("=== ChatGPT Desktop Inspector - MCP Auto-Suche ===\n")
                 report_lines.append(f"Logs: {logs_dir}\nIndexedDB: {idx_dir}\nSession: {ses_dir}\nLocalStorage: {ls_dir}\n\n")
 
                 # 1) Logs
@@ -859,8 +864,8 @@ class InspectorApp(tk.Tk):
                             report_lines.extend([h+"\n" for h in hits[:1000]])
                         report_lines.append("\n")
 
-                # 2) Session Storage – Strings
-                report_lines.append("[SESSION STORAGE – Strings] \n")
+                # 2) Session Storage - Strings
+                report_lines.append("[SESSION STORAGE - Strings] \n")
                 ses_text, ses_bin = list_candidate_files_in_leveldb(ses_dir)
                 for p in ses_bin[:50]:
                     try:
@@ -873,8 +878,8 @@ class InspectorApp(tk.Tk):
                         report_lines.append(f"-- {os.path.basename(p)}: Fehler {ex}\n")
                 report_lines.append("\n")
 
-                # 3) IndexedDB – Strings
-                report_lines.append("[INDEXEDDB – Strings] \n")
+                # 3) IndexedDB - Strings
+                report_lines.append("[INDEXEDDB - Strings] \n")
                 idx_text, idx_bin = list_candidate_files_in_leveldb(idx_dir)
                 for p in idx_bin[:50]:
                     try:
@@ -887,8 +892,8 @@ class InspectorApp(tk.Tk):
                         report_lines.append(f"-- {os.path.basename(p)}: Fehler {ex}\n")
                 report_lines.append("\n")
 
-                # 4) Local Storage – Strings
-                report_lines.append("[LOCAL STORAGE – Strings] \n")
+                # 4) Local Storage - Strings
+                report_lines.append("[LOCAL STORAGE - Strings] \n")
                 ls_text, ls_bin = list_candidate_files_in_leveldb(ls_dir)
                 for p in ls_bin[:50]:
                     try:
@@ -901,8 +906,63 @@ class InspectorApp(tk.Tk):
                         report_lines.append(f"-- {os.path.basename(p)}: Fehler {ex}\n")
                 report_lines.append("\n")
 
+                def add_file_group(title: str, entries):
+                    report_lines.append(f"{title}\n")
+                    found_any = False
+                    for label, path in entries:
+                        data = self._read_file_for_search(path)
+                        if not data:
+                            continue
+                        hits = search_lines(data.splitlines(), DEFAULT_MCP_PATTERNS)
+                        report_lines.append(f"-- {label}: {len(hits)} Treffer\n")
+                        if hits:
+                            found_any = True
+                            report_lines.extend([h + "\n" for h in hits[:200]])
+                        report_lines.append("\n")
+                    if not entries:
+                        report_lines.append("(keine Dateien gefunden)\n\n")
+                    elif not found_any:
+                        report_lines.append("(keine Treffer)\n\n")
+
+                network_dir = self.network_dir.get().strip()
+                if network_dir and os.path.isdir(network_dir):
+                    add_file_group(
+                        "[NETWORK / SECURITY]",
+                        [
+                            ("Network Persistent State", os.path.join(network_dir, "Network Persistent State")),
+                            ("TransportSecurity", os.path.join(network_dir, "TransportSecurity")),
+                            ("Cookies (SQLite)", os.path.join(network_dir, "Cookies")),
+                            ("Trust Tokens (SQLite)", os.path.join(network_dir, "Trust Tokens")),
+                        ],
+                    )
+
+                add_file_group(
+                    "[CONFIGURATION]",
+                    [
+                        ("config.json", self.config_file.get().strip()),
+                        ("Local State", self.local_state_file.get().strip()),
+                        ("Preferences", self.preferences_file.get().strip()),
+                    ],
+                )
+
+                add_file_group(
+                    "[STORAGE / SQLITE]",
+                    [
+                        ("QuotaManager", self.quota_manager_file.get().strip()),
+                        ("SharedStorage", self.sharedstorage_file.get().strip()),
+                        ("DIPS", self.dips_file.get().strip()),
+                    ],
+                )
+
+                sentry_dir = self.sentry_dir.get().strip()
+                sentry_entries = []
+                if sentry_dir and os.path.isdir(sentry_dir):
+                    sentry_entries.append(("sentry/session.json", os.path.join(sentry_dir, "session.json")))
+                    sentry_entries.append(("sentry/queue/queue-v2.json", os.path.join(sentry_dir, "queue", "queue-v2.json")))
+                add_file_group("[TELEMETRY]", sentry_entries)
+
                 out_path.write_text("".join(report_lines), encoding="utf-8", errors="replace")
-                self.status_var.set(f"Auto‑Suche fertig. Report: {out_path}")
+                self.status_var.set(f"Auto-Suche fertig. Report: {out_path}")
             except Exception as ex:
                 self.status_var.set(f"Fehler: {ex}")
                 messagebox.showerror("Fehler", str(ex))
