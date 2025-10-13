@@ -34,44 +34,36 @@ class InspectorApp(tk.Tk):
         self.ses_text = []; self.ses_bin = []
         self.ls_text = []; self.ls_bin = []
         self.logs_files = []
+        self.idx_minlen_var = self.idx_utf16_var = self.idx_maxmb_var = None
+        self.ses_minlen_var = self.ses_utf16_var = self.ses_maxmb_var = None
+        self.ls_minlen_var = self.ls_utf16_var = self.ls_maxmb_var = None
 
         self._build_ui()
+        Path(DEFAULT_EXPORT_DIR).mkdir(exist_ok=True)
+        self.auto_find_all(force=True)
 
     def _build_ui(self):
-        top = ttk.Frame(self); top.pack(fill="x", padx=8, pady=8)
+        top = ttk.LabelFrame(self, text="Quellen (automatisch erkannt)")
+        top.pack(fill="x", padx=8, pady=8)
 
-        row0 = ttk.Frame(top); row0.pack(fill="x", pady=(0,4))
+        row0 = ttk.Frame(top); row0.pack(fill="x", pady=(0,6))
         ttk.Label(row0, text="Root (optional):").pack(side="left")
-        ttk.Entry(row0, textvariable=self.root_dir, width=80).pack(side="left", padx=6)
-        ttk.Button(row0, text="Root wählen", command=lambda:self._choose_dir(self.root_dir)).pack(side="left")
-        ttk.Button(row0, text="Auto finden (alle)", command=self.auto_find_all).pack(side="left", padx=6)
+        ttk.Entry(row0, textvariable=self.root_dir, width=80).pack(side="left", fill="x", expand=True, padx=6)
+        ttk.Button(
+            row0,
+            text="Root wählen",
+            command=lambda:self._choose_dir(self.root_dir, lambda: self.auto_find_all(force=True))
+        ).pack(side="left")
+        ttk.Button(row0, text="Auto finden (alle)", command=lambda:self.auto_find_all(force=True)).pack(side="left", padx=6)
+        ttk.Button(row0, text="Neu laden (alle)", command=self.scan_all).pack(side="left")
 
-        row1 = ttk.Frame(top); row1.pack(fill="x", pady=(0,4))
-        ttk.Label(row1, text="Logs:").pack(side="left")
-        ttk.Entry(row1, textvariable=self.logs_dir, width=85).pack(side="left", padx=6)
-        ttk.Button(row1, text="Ordner wählen", command=lambda:self._choose_dir(self.logs_dir)).pack(side="left")
-        ttk.Button(row1, text="Neu scannen", command=self.scan_logs).pack(side="left", padx=6)
+        self._build_path_row(top, "Logs", self.logs_dir, self.scan_logs)
+        self._build_path_row(top, "IndexedDB", self.indexeddb_dir, self.scan_indexeddb)
+        self._build_path_row(top, "Session Storage", self.session_dir, self.scan_session)
+        self._build_path_row(top, "Local Storage (leveldb)", self.localstorage_dir, self.scan_localstorage)
 
-        row2 = ttk.Frame(top); row2.pack(fill="x", pady=(0,4))
-        ttk.Label(row2, text="IndexedDB:").pack(side="left")
-        ttk.Entry(row2, textvariable=self.indexeddb_dir, width=80).pack(side="left", padx=6)
-        ttk.Button(row2, text="Ordner wählen", command=lambda:self._choose_dir(self.indexeddb_dir)).pack(side="left")
-        ttk.Button(row2, text="Neu scannen", command=self.scan_indexeddb).pack(side="left", padx=6)
-
-        row3 = ttk.Frame(top); row3.pack(fill="x", pady=(0,4))
-        ttk.Label(row3, text="Session Storage:").pack(side="left")
-        ttk.Entry(row3, textvariable=self.session_dir, width=78).pack(side="left", padx=6)
-        ttk.Button(row3, text="Ordner wählen", command=lambda:self._choose_dir(self.session_dir)).pack(side="left")
-        ttk.Button(row3, text="Neu scannen", command=self.scan_session).pack(side="left", padx=6)
-
-        row4 = ttk.Frame(top); row4.pack(fill="x", pady=(0,4))
-        ttk.Label(row4, text="Local Storage (leveldb):").pack(side="left")
-        ttk.Entry(row4, textvariable=self.localstorage_dir, width=70).pack(side="left", padx=6)
-        ttk.Button(row4, text="Ordner wählen", command=lambda:self._choose_dir(self.localstorage_dir)).pack(side="left")
-        ttk.Button(row4, text="Neu scannen", command=self.scan_localstorage).pack(side="left", padx=6)
-
-        row5 = ttk.Frame(top); row5.pack(fill="x", pady=(4,0))
-        ttk.Button(row5, text="🔎 MCP Auto‑Suche (Report)", command=self.run_mcp_auto_search).pack(side="left")
+        tools = ttk.Frame(self); tools.pack(fill="x", padx=8, pady=(0,8))
+        ttk.Button(tools, text="🔎 MCP Auto‑Suche (Report)", command=self.run_mcp_auto_search).pack(side="left")
 
         self.nb = ttk.Notebook(self); self.nb.pack(fill="both", expand=True, padx=8, pady=8)
 
@@ -92,32 +84,43 @@ class InspectorApp(tk.Tk):
         sb = ttk.Frame(self); sb.pack(fill="x")
         ttk.Label(sb, textvariable=self.status_var, anchor="w").pack(fill="x")
 
-        Path(DEFAULT_EXPORT_DIR).mkdir(exist_ok=True)
+    def _build_path_row(self, parent, label, var, on_change):
+        row = ttk.Frame(parent); row.pack(fill="x", pady=2)
+        ttk.Label(row, text=f"{label}:").pack(side="left")
+        entry = ttk.Entry(row, textvariable=var, width=90)
+        entry.pack(side="left", fill="x", expand=True, padx=6)
+        entry.bind("<Return>", lambda _e: on_change())
+        entry.bind("<KP_Enter>", lambda _e: on_change())
+        ttk.Button(row, text="Ordner wählen", command=lambda:self._choose_dir(var, on_change)).pack(side="left")
 
-        # Initial scans
-        self.scan_logs(); self.scan_indexeddb(); self.scan_session(); self.scan_localstorage()
-
-    def _choose_dir(self, var):
+    def _choose_dir(self, var, on_change=None):
         p = filedialog.askdirectory(title="Ordner auswählen")
         if p:
             var.set(p)
+            if on_change:
+                self.after_idle(on_change)
 
-    def auto_find_all(self):
+    def scan_all(self):
+        self.scan_logs()
+        self.scan_indexeddb()
+        self.scan_session()
+        self.scan_localstorage()
+
+    def auto_find_all(self, force=False):
         root = self.root_dir.get().strip()
         if root:
             found = autodetect_from_root(root)
         else:
             found = detect_default_paths()
-        if found.get("logs") and not self.logs_dir.get().strip():
-            self.logs_dir.set(found["logs"])
-        if found.get("indexeddb") and not self.indexeddb_dir.get().strip():
-            self.indexeddb_dir.set(found["indexeddb"])
-        if found.get("session") and not self.session_dir.get().strip():
-            self.session_dir.set(found["session"])
-        if found.get("localstorage") and not self.localstorage_dir.get().strip():
-            self.localstorage_dir.set(found["localstorage"])
+        def maybe_set(var, key):
+            if found.get(key) and (force or not var.get().strip()):
+                var.set(found[key])
+        maybe_set(self.logs_dir, "logs")
+        maybe_set(self.indexeddb_dir, "indexeddb")
+        maybe_set(self.session_dir, "session")
+        maybe_set(self.localstorage_dir, "localstorage")
         self.status_var.set(f"Auto‑Erkennung: Logs={bool(found.get('logs'))}, IndexedDB={bool(found.get('indexeddb'))}, Session={bool(found.get('session'))}, LocalStorage={bool(found.get('localstorage'))}")
-        self.scan_logs(); self.scan_indexeddb(); self.scan_session(); self.scan_localstorage()
+        self.scan_all()
 
     # --- Logs Tab ---
     def _build_tab_logs(self, parent):
@@ -188,8 +191,20 @@ class InspectorApp(tk.Tk):
         ttk.Label(top, text="Max. MB (optional):").pack(side="left", padx=(10,0))
         maxmb_var = tk.StringVar(value="")
         ttk.Entry(top, textvariable=maxmb_var, width=6).pack(side="left", padx=(4,10))
-        ttk.Button(top, text="Strings scannen", command=lambda:self.scan_strings(which, minlen_var, utf16_var, maxmb_var)).pack(side="left")
+        ttk.Button(top, text="Strings erneut scannen", command=lambda:self.scan_strings(which, minlen_var, utf16_var, maxmb_var)).pack(side="left")
         ttk.Button(top, text="Export Strings", command=lambda:self.export_current_strings(which)).pack(side="left", padx=6)
+        if which == "idx":
+            self.idx_minlen_var = minlen_var
+            self.idx_utf16_var = utf16_var
+            self.idx_maxmb_var = maxmb_var
+        elif which == "ses":
+            self.ses_minlen_var = minlen_var
+            self.ses_utf16_var = utf16_var
+            self.ses_maxmb_var = maxmb_var
+        else:
+            self.ls_minlen_var = minlen_var
+            self.ls_utf16_var = utf16_var
+            self.ls_maxmb_var = maxmb_var
 
         body = ttk.Frame(parent); body.pack(fill="both", expand=True)
         left = ttk.Frame(body); left.pack(side="left", fill="y", padx=(0,6))
@@ -255,6 +270,13 @@ class InspectorApp(tk.Tk):
             return None
         return files[idx]
 
+    def _leveldb_controls(self, which):
+        if which == "idx":
+            return self.idx_minlen_var, self.idx_utf16_var, self.idx_maxmb_var
+        if which == "ses":
+            return self.ses_minlen_var, self.ses_utf16_var, self.ses_maxmb_var
+        return self.ls_minlen_var, self.ls_utf16_var, self.ls_maxmb_var
+
     def on_select_leveldb_file(self, which):
         if which == "idx":
             lb, tv, text_files = self.idx_list, self.idx_textview, self.idx_text
@@ -273,8 +295,12 @@ class InspectorApp(tk.Tk):
             tv.delete("1.0","end")
             tv.insert("1.0", header + content)
         else:
-            tv.delete("1.0","end")
-            tv.insert("1.0", "[Binärdatei ausgewählt. Bitte 'Strings scannen' verwenden.]")
+            minlen_var, utf16_var, maxmb_var = self._leveldb_controls(which)
+            if minlen_var is None:
+                tv.delete("1.0","end")
+                tv.insert("1.0", "[Binärdatei ausgewählt. Automatischer Scan nicht verfügbar.]")
+                return
+            self.scan_strings(which, minlen_var, utf16_var, maxmb_var)
 
     def apply_leveldb_filter(self, which, var):
         q = var.get().strip().lower()

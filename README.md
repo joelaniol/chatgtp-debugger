@@ -3,9 +3,10 @@
 Desktop-Tool zum schnellen Auslesen der lokalen ChatGPT-Desktop-Datenbanken unter Windows: Logs, IndexedDB, Session Storage und Local Storage (LevelDB). Fokus liegt auf schneller Navigation, automatischer Pfaderkennung und einfacher Export-Funktion.
 
 ## Features
-- Auto-Detect der wichtigsten Verzeichnisse (Microsoft Store und klassische EXE-Installation).
+- Auto-Detect der wichtigsten Verzeichnisse (Microsoft Store und klassische EXE-Installation) laeuft beim Start automatisch und kann jederzeit erneut angestossen werden.
 - Optionaler Root-Scan, um alle Quellen unterhalb eines ausgewaehlten Verzeichnisses zu finden.
 - Tabs fuer Logs, IndexedDB, Session Storage und Local Storage inkl. String-Extraktion (ASCII, UTF-16LE).
+- Automatisches Strings-Scanning: Binaerdateien werden beim Anklicken sofort extrahiert; der Button dient fuer erneute Scans.
 - MCP Auto-Suche, die relevante Hinweise in allen Quellen zusammenfasst (`outputs/mcp_report.txt`).
 - Export der angezeigten Strings in Textdateien.
 
@@ -19,7 +20,7 @@ Desktop-Tool zum schnellen Auslesen der lokalen ChatGPT-Desktop-Datenbanken unte
    - Erstellt bei Bedarf `.venv`.
    - Installiert `requirements.txt` (aktuell nur `chardet`).
    - Startet direkt die Anwendung.
-3. In der App optional einen Root-Ordner auswaehlen und `Auto finden (alle)` starten oder die einzelnen Quellen-Ordner manuell setzen.
+3. Nach dem Start erkennt die App alle Quellen automatisch. Optional einen Root-Ordner setzen und `Auto finden (alle)` nutzen oder mit `Neu laden (alle)` bzw. `Ordner waehlen` gezielt aktualisieren.
 
 ## Manueller Start
 ```powershell
@@ -31,9 +32,9 @@ python app.py
 Falls `py` nicht verfuegbar ist, stattdessen `python` verwenden. Fuer UTF-8-Ausgabe kann optional `set PYTHONUTF8=1` gesetzt werden.
 
 ## Bedienkonzept
-- **Root (optional):** Ordner waehlen, der als Ausgangspunkt fuer "Auto finden (alle)" dient.
+- **Root (optional):** Basisordner fuer die automatische Suche. `Auto finden (alle)` stoesst eine komplette Neu-Detektion an, `Neu laden (alle)` scannt die aktuellen Pfade. `Ordner waehlen` aktualisiert den Pfad sofort.
 - **Tabs:** Jeder Tab zeigt Dateien an, die wahlweise als Text oder Strings (mit Extraktion) gelesen werden koennen. Laden und Scannen laufen in separaten Threads, um die GUI reaktionsfaehig zu halten.
-- **Strings scannen:** Extrahiert ASCII- und UTF-16LE-Strings aus Binaerdateien (LevelDB). Lange Dateien werden gestreamt, um Speicher zu sparen.
+- **Automatisches Strings-Scanning:** Beim Anklicken einer Binaerdatei startet die Extraktion automatisch (ASCII, UTF-16LE). Der Button `Strings erneut scannen` wiederholt den Vorgang mit angepassten Parametern.
 - **Export:** Speichert den aktuellen Inhalt des Editors unter `outputs/<dateiname>.strings.txt`.
 
 ## MCP Auto-Suche
@@ -51,7 +52,7 @@ Falls `py` nicht verfuegbar ist, stattdessen `python` verwenden. Fuer UTF-8-Ausg
 - Bei mehreren Kandidaten wird der wahrscheinlichste Ordner (z. B. `https_chatgpt.com_0.indexeddb.leveldb`) bevorzugt.
 
 ## Troubleshooting
-- **Leere Tabs:** Pfade pruefen oder die Auto-Erkennung erneut ausfuehren.
+- **Leere Tabs:** Pfade pruefen oder `Auto finden (alle)`/`Neu laden (alle)` ausfuehren.
 - **Keine Python-Installation:** Offizielle Python-Version installieren (https://www.python.org/downloads/) und waehrend des Setups `Add Python to PATH` aktivieren.
 - **Unicode-Artefakte:** Ausgabe erfolgt UTF-8-basiert. Falls Zeichen falsch angezeigt werden, sicherstellen, dass das Terminal bzw. die Ziel-Datei UTF-8 unterstuetzt.
 
