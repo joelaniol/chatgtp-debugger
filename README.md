@@ -11,6 +11,7 @@ Desktop-Tool zum schnellen Auslesen der lokalen ChatGPT-Desktop-Datenbanken unte
 - Telemetry-Tab aggregiert Sentry-Session/Queue sowie Crashpad-Hinweise.
 - Netzwerk-, Konfig- und Speicher-Tabs liefern JSON-Pretty-Print und schreibgeschuetzte SQLite-Vorschauen (Cookies, Trust Tokens, QuotaManager, SharedStorage, DIPS, PrivateAggregation).
 - Registry-Viewer (read-only) zeigt relevante Windows-Schluessel der ChatGPT-Desktop-App.
+- Installation-Tab (read-only) sammelt wichtige Dateien aus dem Windows-App-Paket (AppxManifest, Ressourcen, Executable, settings.dat).
 - Chromium-Caches (`Cache_Data`, `Code Cache`) werden erkannt und bei der automatischen Suche auf MCP-Hinweise analysiert.
 - MCP Auto-Suche, die relevante Hinweise in allen Quellen zusammenfasst (`outputs/mcp_report.txt`).
 - Export der angezeigten Strings in Textdateien.
@@ -64,6 +65,7 @@ Falls `py` nicht verfuegbar ist, stattdessen `python` verwenden. Fuer UTF-8-Ausg
   - `Crashpad/` (Reports/Attachments)
   - `config.json`, `Local State`, `Preferences`
   - `WebStorage/QuotaManager`, `SharedStorage`, `DIPS`, `PrivateAggregation`
+  - Windows-App-Paket (`AppxManifest.xml`, `AppxMetadata`, `app/resources/app.asar`, `ChatGPT.exe`, `settings.dat`)
 - Bei mehreren Kandidaten wird der wahrscheinlichste Ordner (z. B. `https_chatgpt.com_0.indexeddb.leveldb`) bevorzugt.
 
 ## Troubleshooting

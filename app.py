@@ -97,7 +97,7 @@ class InspectorApp(tk.Tk):
         self.summary_found_var = tk.StringVar(value="Gefunden: 0")
         self.summary_missing_var = tk.StringVar(value="Nicht gefunden: 0")
         ttk.Label(stats_row, textvariable=self.summary_found_var, foreground="#1f7f37").pack(side="left")
-        ttk.Label(stats_row, textvariable=self.summary_missing_var, foreground="#b32424", padx=12).pack(side="left")
+        ttk.Label(stats_row, textvariable=self.summary_missing_var, foreground="#b32424").pack(side="left", padx=12)
         self.summary_toggle_button = ttk.Button(
             stats_row,
             text="Details anzeigen",
