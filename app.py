@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from text_utils import (
-    safe_read_text, extract_strings_from_file,
+    safe_read_text, extract_strings_from_file, binary_preview, is_probably_binary,
     list_candidate_files_in_leveldb, list_log_files,
     detect_default_paths, autodetect_from_root, search_lines, DEFAULT_MCP_PATTERNS
 )
@@ -444,6 +444,11 @@ class InspectorApp(tk.Tk):
         maybe_set(self.quota_manager_file, "quota_manager")
         maybe_set(self.dips_file, "dips")
         maybe_set(self.privateaggregation_dir, "privateaggregation")
+        maybe_set(self.settings_file, "settings")
+        maybe_set(self.package_root_dir, "package_root")
+        maybe_set(self.exe_path_file, "exe_path")
+        maybe_set(self.app_dir, "app_dir")
+        maybe_set(self.resources_dir, "resources_dir")
         maybe_set(self.base_dir, "base")
         self._refresh_registry_sources()
         self.status_var.set(
@@ -910,6 +915,43 @@ class InspectorApp(tk.Tk):
             pa_dir = self.privateaggregation_dir.get().strip()
             if pa_dir:
                 self._add_structured_item(items, "PrivateAggregation", pa_dir, allow_directory=False)
+        elif which == "install":
+            pkg_root = self.package_root_dir.get().strip()
+            app_dir = self.app_dir.get().strip()
+            resources_dir = self.resources_dir.get().strip()
+            exe_path = self.exe_path_file.get().strip()
+            settings_path = self.settings_file.get().strip()
+
+            mapping = [
+                ("ChatGPT.exe", exe_path),
+                ("settings.dat", settings_path),
+            ]
+            if pkg_root:
+                mapping.extend([
+                    ("AppxManifest.xml", os.path.join(pkg_root, "AppxManifest.xml")),
+                    ("AppxBlockMap.xml", os.path.join(pkg_root, "AppxBlockMap.xml")),
+                    ("AppxSignature.p7x", os.path.join(pkg_root, "AppxSignature.p7x")),
+                    ("priconfig.xml", os.path.join(pkg_root, "priconfig.xml")),
+                ])
+            if app_dir:
+                mapping.extend([
+                    ("app/LICENSE", os.path.join(app_dir, "LICENSE")),
+                    ("app/LICENSES.chromium.html", os.path.join(app_dir, "LICENSES.chromium.html")),
+                    ("app/version", os.path.join(app_dir, "version")),
+                    ("app/resources.pak", os.path.join(app_dir, "resources.pak")),
+                    ("app/snapshot_blob.bin", os.path.join(app_dir, "snapshot_blob.bin")),
+                    ("app/v8_context_snapshot.bin", os.path.join(app_dir, "v8_context_snapshot.bin")),
+                ])
+            if resources_dir:
+                mapping.append(("app/resources/app.asar", os.path.join(resources_dir, "app.asar")))
+
+            for label, path in mapping:
+                self._add_structured_item(items, label, path)
+
+            if app_dir:
+                self._add_structured_item(items, "app (Auszug)", app_dir, allow_directory=True, max_entries=40)
+            if resources_dir:
+                self._add_structured_item(items, "app/resources (Auszug)", resources_dir, allow_directory=True, max_entries=40)
         elif which == "registry":
             for key, base_label, root_name, base_path, pattern, multi in self._registry_defs:
                 matches = self._list_registry_matches(root_name, base_path, pattern, multi)
@@ -955,13 +997,30 @@ class InspectorApp(tk.Tk):
         try:
             if self._is_sqlite(path):
                 return self._preview_sqlite(path)
-            text = Path(path).read_text(encoding="utf-8", errors="replace")
-            try:
-                obj = json.loads(text)
-                return json.dumps(obj, indent=2, ensure_ascii=False)
-            except json.JSONDecodeError:
-                pass
+            if is_probably_binary(path):
+                sections: List[str] = [binary_preview(path, max_bytes=4096)]
+                try:
+                    _read_bytes, strings = extract_strings_from_file(
+                        path, min_len=6, include_utf16le=True, max_mb=1
+                    )
+                except Exception:
+                    strings = []
+                if strings:
+                    sections.append("")
+                    sections.append("[Strings >=6 chars]")
+                    max_strings = 40
+                    sections.extend(strings[:max_strings])
+                    if len(strings) > max_strings:
+                        sections.append(f"... ({len(strings)} strings total)")
+                return "\n".join(sections)
             enc, content = safe_read_text(path, max_bytes=2 * 1024 * 1024)
+            stripped = content.strip()
+            if stripped:
+                try:
+                    obj = json.loads(stripped)
+                    return json.dumps(obj, indent=2, ensure_ascii=False)
+                except json.JSONDecodeError:
+                    pass
             return f"[encoding={enc}]\n{content}"
         except Exception as ex:
             return f"[Fehler beim Lesen: {ex}]"
@@ -1098,13 +1157,16 @@ class InspectorApp(tk.Tk):
     def _preview_sqlite(self, path: str, row_limit: int = 25) -> str:
         lock_suffixes = ["-journal", "-wal", "-shm"]
         active_locks = [p for p in (path + suffix for suffix in lock_suffixes) if os.path.exists(p)]
-        if active_locks:
+        def lock_message() -> str:
             names = ", ".join(os.path.basename(p) for p in active_locks) or "Lock-Dateien"
             return f"[SQLite gesperrt ({names}). Bitte Anwendung schliessen und erneut versuchen.]"
         try:
             conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
             conn.row_factory = sqlite3.Row
         except sqlite3.Error as ex:
+            msg = str(ex).lower()
+            if "locked" in msg or "busy" in msg:
+                return lock_message() if active_locks else "[SQLite gesperrt. Bitte Anwendung schliessen und erneut versuchen.]"
             return f"[SQLite konnte nicht geoeffnet werden: {ex}]"
         try:
             tables = [

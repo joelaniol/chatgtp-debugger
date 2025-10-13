@@ -117,6 +117,43 @@ def safe_read_text(path: str, max_bytes: Optional[int] = None) -> Tuple[str, str
             pass
     return ("latin-1", data.decode("latin-1", errors="replace"))
 
+def is_probably_binary(path: str, sample_size: int = 4096) -> bool:
+    try:
+        with open(path, "rb") as fh:
+            sample = fh.read(sample_size)
+    except Exception:
+        return False
+    if not sample:
+        return False
+    if b"\x00" in sample:
+        return True
+    non_text = sum(1 for b in sample if b not in PRINTABLE_WITH_WS)
+    return (non_text / len(sample)) > 0.30
+
+def binary_preview(path: str, max_bytes: int = 4096, width: int = 16) -> str:
+    try:
+        p = Path(path)
+        total_size = p.stat().st_size
+        with p.open("rb") as fh:
+            data = fh.read(max_bytes)
+    except Exception as ex:
+        return f"[Fehler beim Lesen: {ex}]"
+    if not data:
+        return "[Datei leer]"
+    lines: List[str] = []
+    header = f"[Binary preview] showing {len(data)} of {total_size} bytes"
+    lines.append(header)
+    lines.append("")
+    for offset in range(0, len(data), width):
+        chunk = data[offset:offset + width]
+        hex_part = " ".join(f"{b:02X}" for b in chunk).ljust(width * 3 - 1)
+        ascii_part = "".join(chr(b) if b in PRINTABLE_ASCII else "." for b in chunk)
+        lines.append(f"{offset:08X}  {hex_part}  {ascii_part}")
+    if total_size > len(data):
+        remaining = total_size - len(data)
+        lines.append(f"... ({remaining} additional bytes not shown)")
+    return "\n".join(lines)
+
 def _ascii_strings_from_bytes(b: bytes, min_len: int) -> List[str]:
     out: List[str] = []
     acc: List[int] = []
