@@ -7,6 +7,9 @@ Desktop-Tool zum schnellen Auslesen der lokalen ChatGPT-Desktop-Datenbanken unte
 - Optionaler Root-Scan, um alle Quellen unterhalb eines ausgewaehlten Verzeichnisses zu finden.
 - Tabs fuer Logs, IndexedDB, Session Storage und Local Storage inkl. String-Extraktion (ASCII, UTF-16LE).
 - Automatisches Strings-Scanning: Binaerdateien werden beim Anklicken sofort extrahiert; der Button dient fuer erneute Scans.
+- Kompakte Pfad-Uebersicht mit Statusanzeige; manuelle Anpassungen erfolgen ueber den Button `Erweiterte Pfade ...`.
+- Telemetry-Tab aggregiert Sentry-Session/Queue sowie Crashpad-Hinweise.
+- Netzwerk-, Konfig- und Speicher-Tabs liefern JSON-Pretty-Print und schreibgeschuetzte SQLite-Vorschauen (Cookies, Trust Tokens, QuotaManager, SharedStorage, DIPS, PrivateAggregation).
 - MCP Auto-Suche, die relevante Hinweise in allen Quellen zusammenfasst (`outputs/mcp_report.txt`).
 - Export der angezeigten Strings in Textdateien.
 
@@ -32,10 +35,12 @@ python app.py
 Falls `py` nicht verfuegbar ist, stattdessen `python` verwenden. Fuer UTF-8-Ausgabe kann optional `set PYTHONUTF8=1` gesetzt werden.
 
 ## Bedienkonzept
-- **Root (optional):** Basisordner fuer die automatische Suche. `Auto finden (alle)` stoesst eine komplette Neu-Detektion an, `Neu laden (alle)` scannt die aktuellen Pfade. `Ordner waehlen` aktualisiert den Pfad sofort.
-- **Tabs:** Jeder Tab zeigt Dateien an, die wahlweise als Text oder Strings (mit Extraktion) gelesen werden koennen. Laden und Scannen laufen in separaten Threads, um die GUI reaktionsfaehig zu halten.
+- **Pfad-Uebersicht:** Die Startseite zeigt fuer jede Quelle den Status (`Gefunden` oder `Nicht gefunden`). Feinanpassungen koennen ueber `Erweiterte Pfade ...` vorgenommen werden.
+- **Root (optional):** Basisordner fuer die automatische Suche. `Auto finden (alle)` stoesst eine komplette Neu-Detektion an, `Neu laden (alle)` scannt die aktuellen Pfade erneut. `Root waehlen` aktualisiert den Pfad sofort.
+- **Tabs:** Logs, IndexedDB, Session Storage und Local Storage liefern Text- und String-Ansichten; laengere Operationen laufen in separaten Threads.
+- **Telemetry / Netzwerk / Konfiguration / Speicher:** Neue Viewer fuer Sentry, Crashpad, Netzwerk-Dateien (HTTP/QUIC, Cookies), Konfigurationsdateien (config.json, Preferences) sowie SQLite-basierte Speicher (QuotaManager, SharedStorage, DIPS, PrivateAggregation) mit schreibgeschuetzter Vorschau.
 - **Automatisches Strings-Scanning:** Beim Anklicken einer Binaerdatei startet die Extraktion automatisch (ASCII, UTF-16LE). Der Button `Strings erneut scannen` wiederholt den Vorgang mit angepassten Parametern.
-- **Export:** Speichert den aktuellen Inhalt des Editors unter `outputs/<dateiname>.strings.txt`.
+- **Export:** Speichert den aktuellen Inhalt des jeweiligen Viewers unter `outputs/<dateiname>.strings.txt`.
 
 ## MCP Auto-Suche
 - Startet einen Hintergrund-Thread und durchsucht alle Quellen anhand der Muster in `text_utils.DEFAULT_MCP_PATTERNS`.
@@ -44,11 +49,16 @@ Falls `py` nicht verfuegbar ist, stattdessen `python` verwenden. Fuer UTF-8-Ausg
 
 ## Datenquellen & Pfade
 - Automatische Erkennung nutzt Variablen `LOCALAPPDATA` und `APPDATA`.
-- Unterstuetzte Ordner:
+- Unterstuetzte Ordner/Dateien (werden automatisch erkannt und im UI zusammengefasst):
   - `Logs`
   - `IndexedDB/<site>.indexeddb.leveldb`
   - `Session Storage`
   - `Local Storage/leveldb`
+  - `Network` (u. a. `Network Persistent State`, `TransportSecurity`, `Cookies`, `Trust Tokens`)
+  - `sentry/` (Session/Queue)
+  - `Crashpad/` (Reports/Attachments)
+  - `config.json`, `Local State`, `Preferences`
+  - `WebStorage/QuotaManager`, `SharedStorage`, `DIPS`, `PrivateAggregation`
 - Bei mehreren Kandidaten wird der wahrscheinlichste Ordner (z. B. `https_chatgpt.com_0.indexeddb.leveldb`) bevorzugt.
 
 ## Troubleshooting

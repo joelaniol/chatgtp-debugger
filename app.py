@@ -1,4 +1,6 @@
+import json
 import os
+import sqlite3
 import threading
 from pathlib import Path
 import tkinter as tk
@@ -27,6 +29,17 @@ class InspectorApp(tk.Tk):
         self.session_dir = tk.StringVar(value=defaults.get("session",""))
         self.logs_dir = tk.StringVar(value=defaults.get("logs",""))
         self.localstorage_dir = tk.StringVar(value=defaults.get("localstorage",""))
+        self.network_dir = tk.StringVar(value=defaults.get("network",""))
+        self.sentry_dir = tk.StringVar(value=defaults.get("sentry",""))
+        self.config_file = tk.StringVar(value=defaults.get("config",""))
+        self.local_state_file = tk.StringVar(value=defaults.get("local_state",""))
+        self.preferences_file = tk.StringVar(value=defaults.get("preferences",""))
+        self.crashpad_dir = tk.StringVar(value=defaults.get("crashpad",""))
+        self.sharedstorage_file = tk.StringVar(value=defaults.get("sharedstorage",""))
+        self.quota_manager_file = tk.StringVar(value=defaults.get("quota_manager",""))
+        self.dips_file = tk.StringVar(value=defaults.get("dips",""))
+        self.privateaggregation_dir = tk.StringVar(value=defaults.get("privateaggregation",""))
+        self.base_dir = tk.StringVar(value=defaults.get("base",""))
         self.status_var = tk.StringVar(value="Bereit")
 
         # Data caches
@@ -37,6 +50,8 @@ class InspectorApp(tk.Tk):
         self.idx_minlen_var = self.idx_utf16_var = self.idx_maxmb_var = None
         self.ses_minlen_var = self.ses_utf16_var = self.ses_maxmb_var = None
         self.ls_minlen_var = self.ls_utf16_var = self.ls_maxmb_var = None
+        self.telemetry_text = None
+        self.struct_views = {}
 
         self._build_ui()
         Path(DEFAULT_EXPORT_DIR).mkdir(exist_ok=True)
@@ -57,10 +72,21 @@ class InspectorApp(tk.Tk):
         ttk.Button(row0, text="Auto finden (alle)", command=lambda:self.auto_find_all(force=True)).pack(side="left", padx=6)
         ttk.Button(row0, text="Neu laden (alle)", command=self.scan_all).pack(side="left")
 
-        self._build_path_row(top, "Logs", self.logs_dir, self.scan_logs)
-        self._build_path_row(top, "IndexedDB", self.indexeddb_dir, self.scan_indexeddb)
-        self._build_path_row(top, "Session Storage", self.session_dir, self.scan_session)
-        self._build_path_row(top, "Local Storage (leveldb)", self.localstorage_dir, self.scan_localstorage)
+        summary = ttk.Frame(top); summary.pack(fill="x", pady=(4,4))
+        ttk.Label(summary, text="Gefundene Quellen:").pack(anchor="w")
+        summary_grid = ttk.Frame(summary)
+        summary_grid.pack(fill="x", pady=(2,0))
+        summary_grid.columnconfigure(1, weight=1)
+
+        self.path_summary_vars = {}
+        for idx, (key, label, var) in enumerate(self._path_summary_items()):
+            ttk.Label(summary_grid, text=f"{label}:").grid(row=idx, column=0, sticky="w", padx=(0,6), pady=1)
+            display_var = tk.StringVar(value="")
+            self.path_summary_vars[key] = display_var
+            ttk.Label(summary_grid, textvariable=display_var, anchor="w").grid(row=idx, column=1, sticky="ew", pady=1)
+
+        controls = ttk.Frame(top); controls.pack(fill="x", pady=(4,0))
+        ttk.Button(controls, text="Erweiterte Pfade ...", command=self.open_path_manager).pack(side="left")
 
         tools = ttk.Frame(self); tools.pack(fill="x", padx=8, pady=(0,8))
         ttk.Button(tools, text="🔎 MCP Auto‑Suche (Report)", command=self.run_mcp_auto_search).pack(side="left")
@@ -80,31 +106,121 @@ class InspectorApp(tk.Tk):
         self.tab_ls = ttk.Frame(self.nb); self.nb.add(self.tab_ls, text="Local Storage (leveldb)")
         self._build_tab_leveldb(self.tab_ls, which="ls")
 
+        self.tab_telemetry = ttk.Frame(self.nb); self.nb.add(self.tab_telemetry, text="Telemetry (Sentry)")
+        self._build_tab_telemetry(self.tab_telemetry)
+
+        self.tab_network = ttk.Frame(self.nb); self.nb.add(self.tab_network, text="Netzwerk")
+        self._build_tab_structured(self.tab_network, which="network")
+
+        self.tab_config = ttk.Frame(self.nb); self.nb.add(self.tab_config, text="Konfiguration")
+        self._build_tab_structured(self.tab_config, which="config")
+
+        self.tab_storage = ttk.Frame(self.nb); self.nb.add(self.tab_storage, text="Speicher (SQLite)")
+        self._build_tab_structured(self.tab_storage, which="storage")
+
         # Status bar
         sb = ttk.Frame(self); sb.pack(fill="x")
         ttk.Label(sb, textvariable=self.status_var, anchor="w").pack(fill="x")
 
-    def _build_path_row(self, parent, label, var, on_change):
-        row = ttk.Frame(parent); row.pack(fill="x", pady=2)
-        ttk.Label(row, text=f"{label}:").pack(side="left")
-        entry = ttk.Entry(row, textvariable=var, width=90)
-        entry.pack(side="left", fill="x", expand=True, padx=6)
-        entry.bind("<Return>", lambda _e: on_change())
-        entry.bind("<KP_Enter>", lambda _e: on_change())
-        ttk.Button(row, text="Ordner wählen", command=lambda:self._choose_dir(var, on_change)).pack(side="left")
+        for _, _, var in self._path_summary_items():
+            var.trace_add("write", lambda *_: self._update_path_summary())
+        self._update_path_summary()
 
-    def _choose_dir(self, var, on_change=None):
-        p = filedialog.askdirectory(title="Ordner auswählen")
+    def _path_entries(self):
+        return [
+            ("logs", "Logs", self.logs_dir, "dir"),
+            ("indexeddb", "IndexedDB", self.indexeddb_dir, "dir"),
+            ("session", "Session Storage", self.session_dir, "dir"),
+            ("localstorage", "Local Storage (leveldb)", self.localstorage_dir, "dir"),
+            ("network", "Network", self.network_dir, "dir"),
+            ("sentry", "Sentry", self.sentry_dir, "dir"),
+            ("crashpad", "Crashpad", self.crashpad_dir, "dir"),
+            ("config", "config.json", self.config_file, "file"),
+            ("local_state", "Local State", self.local_state_file, "file"),
+            ("preferences", "Preferences", self.preferences_file, "file"),
+            ("sharedstorage", "SharedStorage", self.sharedstorage_file, "file"),
+            ("quota_manager", "QuotaManager", self.quota_manager_file, "file"),
+            ("dips", "DIPS", self.dips_file, "file"),
+            ("privateaggregation", "PrivateAggregation", self.privateaggregation_dir, "dir"),
+        ]
+
+    def _path_summary_items(self):
+        return [(key, label, var) for key, label, var, _ in self._path_entries()]
+
+    def _update_path_summary(self):
+        for key, label, var, _kind in self._path_entries():
+            summary_var = self.path_summary_vars.get(key)
+            if not summary_var:
+                continue
+            path = var.get().strip()
+            if path:
+                summary_var.set(f"Gefunden: {self._shorten_path(path)}")
+            else:
+                summary_var.set("Nicht gefunden")
+
+    @staticmethod
+    def _shorten_path(path: str, limit: int = 80) -> str:
+        if len(path) <= limit:
+            return path
+        return "..." + path[-(limit-3):]
+
+    def open_path_manager(self):
+        if hasattr(self, "_paths_dialog") and self._paths_dialog.winfo_exists():
+            self._paths_dialog.lift()
+            self._paths_dialog.focus_force()
+            return
+        win = tk.Toplevel(self)
+        win.title("Erweiterte Pfade")
+        win.geometry("780x420")
+        win.resizable(False, False)
+        self._paths_dialog = win
+
+        body = ttk.Frame(win); body.pack(fill="both", expand=True, padx=12, pady=12)
+        for key, label, var, kind in self._path_entries():
+            row = ttk.Frame(body); row.pack(fill="x", pady=2)
+            ttk.Label(row, text=f"{label}:").pack(side="left")
+            entry = ttk.Entry(row, textvariable=var, width=70)
+            entry.pack(side="left", fill="x", expand=True, padx=6)
+            entry.bind("<Return>", lambda _e: self._on_paths_changed(rescan=True))
+            entry.bind("<KP_Enter>", lambda _e: self._on_paths_changed(rescan=True))
+            ttk.Button(
+                row,
+                text="Auswählen",
+                command=lambda v=var, k=kind: self._choose_path(v, lambda: self._on_paths_changed(rescan=True), kind=k)
+            ).pack(side="left")
+
+        buttons = ttk.Frame(body); buttons.pack(fill="x", pady=(10,0))
+        ttk.Button(buttons, text="Auto finden (alle)", command=lambda: self.auto_find_all(force=True)).pack(side="left")
+        ttk.Button(buttons, text="Neu laden", command=self.scan_all).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Schließen", command=win.destroy).pack(side="right")
+
+    def _on_paths_changed(self, rescan=False):
+        self._update_path_summary()
+        if rescan:
+            self.scan_all()
+
+    def _choose_path(self, var, on_change=None, kind="dir"):
+        if kind == "file":
+            p = filedialog.askopenfilename(title="Datei auswählen")
+        else:
+            p = filedialog.askdirectory(title="Ordner auswählen")
         if p:
             var.set(p)
             if on_change:
                 self.after_idle(on_change)
+
+    def _choose_dir(self, var, on_change=None):
+        self._choose_path(var, on_change=on_change, kind="dir")
 
     def scan_all(self):
         self.scan_logs()
         self.scan_indexeddb()
         self.scan_session()
         self.scan_localstorage()
+        self.scan_structured("network")
+        self.scan_structured("config")
+        self.scan_structured("storage")
+        self.scan_telemetry()
 
     def auto_find_all(self, force=False):
         root = self.root_dir.get().strip()
@@ -119,7 +235,27 @@ class InspectorApp(tk.Tk):
         maybe_set(self.indexeddb_dir, "indexeddb")
         maybe_set(self.session_dir, "session")
         maybe_set(self.localstorage_dir, "localstorage")
-        self.status_var.set(f"Auto‑Erkennung: Logs={bool(found.get('logs'))}, IndexedDB={bool(found.get('indexeddb'))}, Session={bool(found.get('session'))}, LocalStorage={bool(found.get('localstorage'))}")
+        maybe_set(self.network_dir, "network")
+        maybe_set(self.sentry_dir, "sentry")
+        maybe_set(self.crashpad_dir, "crashpad")
+        maybe_set(self.config_file, "config")
+        maybe_set(self.local_state_file, "local_state")
+        maybe_set(self.preferences_file, "preferences")
+        maybe_set(self.sharedstorage_file, "sharedstorage")
+        maybe_set(self.quota_manager_file, "quota_manager")
+        maybe_set(self.dips_file, "dips")
+        maybe_set(self.privateaggregation_dir, "privateaggregation")
+        maybe_set(self.base_dir, "base")
+        self._update_path_summary()
+        self.status_var.set(
+            "Auto-Erkennung: "
+            f"Logs={bool(found.get('logs'))}, "
+            f"IndexedDB={bool(found.get('indexeddb'))}, "
+            f"Session={bool(found.get('session'))}, "
+            f"LocalStorage={bool(found.get('localstorage'))}, "
+            f"Network={bool(found.get('network'))}, "
+            f"Sentry={bool(found.get('sentry'))}"
+        )
         self.scan_all()
 
     # --- Logs Tab ---
@@ -399,6 +535,296 @@ class InspectorApp(tk.Tk):
             messagebox.showinfo("Export", "Keine Strings im Editor. Bitte vorher 'Strings scannen'.")
             return
         out = Path(DEFAULT_EXPORT_DIR) / (os.path.basename(path) + ".strings.txt")
+        out.write_text(data, encoding="utf-8", errors="replace")
+        messagebox.showinfo("Export", f"Gespeichert: {out}")
+
+    def _build_tab_telemetry(self, parent):
+        top = ttk.Frame(parent); top.pack(fill="x")
+        ttk.Button(top, text="Neu laden", command=self.scan_telemetry).pack(side="left")
+        ttk.Button(
+            top,
+            text="Export Ansicht",
+            command=lambda:self._export_text_widget(self.telemetry_text, "telemetry_view.txt")
+        ).pack(side="left", padx=6)
+
+        body = ttk.Frame(parent); body.pack(fill="both", expand=True, pady=(6,0))
+        text = tk.Text(body, wrap="none")
+        text.pack(side="left", fill="both", expand=True)
+        scroll_y = ttk.Scrollbar(body, orient="vertical", command=text.yview)
+        scroll_y.pack(side="right", fill="y")
+        text.configure(yscrollcommand=scroll_y.set)
+        self.telemetry_text = text
+
+    def _build_tab_structured(self, parent, which: str):
+        container = ttk.Frame(parent); container.pack(fill="both", expand=True)
+
+        top = ttk.Frame(container); top.pack(fill="x")
+        ttk.Button(top, text="Neu laden", command=lambda:self.scan_structured(which)).pack(side="left")
+        ttk.Button(
+            top,
+            text="Export Ansicht",
+            command=lambda:self.export_structured(which)
+        ).pack(side="left", padx=6)
+
+        body = ttk.Frame(container); body.pack(fill="both", expand=True, pady=(6,0))
+
+        left = ttk.Frame(body); left.pack(side="left", fill="y", padx=(0,6))
+        lb = tk.Listbox(left, width=42, height=18, exportselection=False)
+        lb.pack(side="left", fill="y")
+        lb.bind("<<ListboxSelect>>", lambda _e, key=which: self.on_select_structured_file(key))
+
+        right = ttk.Frame(body); right.pack(side="left", fill="both", expand=True)
+        text = tk.Text(right, wrap="none")
+        text.pack(side="left", fill="both", expand=True)
+        scroll_y = ttk.Scrollbar(right, orient="vertical", command=text.yview)
+        scroll_y.pack(side="left", fill="y")
+        scroll_x = ttk.Scrollbar(right, orient="horizontal", command=text.xview)
+        scroll_x.pack(side="bottom", fill="x")
+        text.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+
+        self.struct_views[which] = {"list": lb, "text": text, "files": []}
+
+    def scan_telemetry(self):
+        if self.telemetry_text is None:
+            return
+        self.telemetry_text.delete("1.0","end")
+        sentry_dir = self.sentry_dir.get().strip()
+        crashpad_dir = self.crashpad_dir.get().strip()
+        if not sentry_dir or not os.path.isdir(sentry_dir):
+            self.telemetry_text.insert("1.0", "[Sentry-Ordner nicht gefunden]\n")
+        else:
+            session_path = os.path.join(sentry_dir, "session.json")
+            queue_path = os.path.join(sentry_dir, "queue", "queue-v2.json")
+            self.telemetry_text.insert("end", "Sentry session.json\n")
+            self.telemetry_text.insert("end", self._read_json_pretty(session_path) + "\n\n")
+            self.telemetry_text.insert("end", "Sentry queue/queue-v2.json\n")
+            self.telemetry_text.insert("end", self._read_json_pretty(queue_path) + "\n")
+        if crashpad_dir and os.path.isdir(crashpad_dir):
+            reports_dir = os.path.join(crashpad_dir, "reports")
+            attachments_dir = os.path.join(crashpad_dir, "attachments")
+            self.telemetry_text.insert("end", "\nCrashpad\n")
+            if os.path.isdir(reports_dir):
+                reports = sorted(os.listdir(reports_dir))
+                if reports:
+                    self.telemetry_text.insert("end", "  Reports:\n")
+                    for name in reports[:20]:
+                        self.telemetry_text.insert("end", f"    {name}\n")
+                    if len(reports) > 20:
+                        self.telemetry_text.insert("end", f"    ... ({len(reports)} gesamt)\n")
+                else:
+                    self.telemetry_text.insert("end", "  Keine Reports\n")
+            else:
+                self.telemetry_text.insert("end", "  reports/-Ordner nicht gefunden\n")
+            if os.path.isdir(attachments_dir):
+                attachments = sorted(os.listdir(attachments_dir))
+                if attachments:
+                    self.telemetry_text.insert("end", "  Attachments:\n")
+                    for name in attachments[:20]:
+                        self.telemetry_text.insert("end", f"    {name}\n")
+                    if len(attachments) > 20:
+                        self.telemetry_text.insert("end", f"    ... ({len(attachments)} gesamt)\n")
+                else:
+                    self.telemetry_text.insert("end", "  Keine Attachments\n")
+        else:
+            self.telemetry_text.insert("end", "\nCrashpad-Ordner nicht gefunden.\n")
+        self.status_var.set("Telemetry aktualisiert.")
+
+    def scan_structured(self, which: str):
+        view = self.struct_views.get(which)
+        if not view:
+            return
+        files = self._discover_structured_files(which)
+        view["files"] = files
+        lb = view["list"]
+        lb.delete(0, "end")
+        for item in files:
+            lb.insert("end", item["label"])
+        text = view["text"]
+        text.delete("1.0","end")
+        if files:
+            lb.selection_set(0)
+            self.on_select_structured_file(which, auto=True)
+        else:
+            text.insert("1.0", "[Keine Dateien gefunden]")
+            self.status_var.set("Keine Dateien gefunden.")
+
+    def on_select_structured_file(self, which: str, auto: bool = False):
+        view = self.struct_views.get(which)
+        if not view:
+            return
+        lb = view["list"]
+        files = view["files"]
+        sel = lb.curselection()
+        if not sel:
+            if auto and files:
+                lb.selection_set(0)
+                sel = (0,)
+            else:
+                return
+        idx = sel[0]
+        if idx < 0 or idx >= len(files):
+            return
+        record = files[idx]
+        content = self._preview_file(record["path"])
+        text = view["text"]
+        text.delete("1.0","end")
+        text.insert("1.0", content)
+        self.status_var.set(f"{record['label']} geladen.")
+
+    def export_structured(self, which: str):
+        view = self.struct_views.get(which)
+        if not view:
+            return
+        filename = f"{which}_view.txt"
+        self._export_text_widget(view["text"], filename)
+
+    def _discover_structured_files(self, which: str):
+        items = []
+        if which == "network":
+            base = self.network_dir.get().strip()
+            if base and os.path.isdir(base):
+                mapping = [
+                    ("Network Persistent State (JSON)", os.path.join(base, "Network Persistent State")),
+                    ("TransportSecurity (JSON)", os.path.join(base, "TransportSecurity")),
+                    ("Cookies (SQLite)", os.path.join(base, "Cookies")),
+                    ("Trust Tokens (SQLite)", os.path.join(base, "Trust Tokens")),
+                ]
+                for label, path in mapping:
+                    self._add_structured_item(items, label, path)
+        elif which == "config":
+            mapping = [
+                ("config.json", self.config_file.get().strip()),
+                ("Local State", self.local_state_file.get().strip()),
+                ("Preferences", self.preferences_file.get().strip()),
+                ("config.lockfile", os.path.join(self.base_dir.get().strip(), "lockfile") if self.base_dir.get().strip() else ""),
+            ]
+            for label, path in mapping:
+                self._add_structured_item(items, label, path)
+        elif which == "storage":
+            mapping = [
+                ("QuotaManager (SQLite)", self.quota_manager_file.get().strip()),
+                ("SharedStorage (SQLite)", self.sharedstorage_file.get().strip()),
+                ("DIPS (SQLite)", self.dips_file.get().strip()),
+            ]
+            for label, path in mapping:
+                self._add_structured_item(items, label, path)
+            pa_dir = self.privateaggregation_dir.get().strip()
+            if pa_dir:
+                self._add_structured_item(items, "PrivateAggregation", pa_dir, allow_directory=True)
+        return items
+
+    def _add_structured_item(self, items, label: str, path: str, allow_directory: bool = False):
+        if not path:
+            return
+        if os.path.isfile(path):
+            items.append({"label": label, "path": path})
+        elif allow_directory and os.path.isdir(path):
+            try:
+                entries = sorted(os.listdir(path))
+            except Exception:
+                entries = []
+            for name in entries:
+                sub_path = os.path.join(path, name)
+                if os.path.isfile(sub_path):
+                    items.append({"label": f"{label}/{name}", "path": sub_path})
+
+    def _preview_file(self, path: str) -> str:
+        if not path or not os.path.exists(path):
+            return "[Datei nicht gefunden]"
+        try:
+            if self._is_sqlite(path):
+                return self._preview_sqlite(path)
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+            try:
+                obj = json.loads(text)
+                return json.dumps(obj, indent=2, ensure_ascii=False)
+            except json.JSONDecodeError:
+                pass
+            enc, content = safe_read_text(path, max_bytes=2 * 1024 * 1024)
+            return f"[encoding={enc}]\n{content}"
+        except Exception as ex:
+            return f"[Fehler beim Lesen: {ex}]"
+
+    def _read_json_pretty(self, path: str) -> str:
+        if not path or not os.path.isfile(path):
+            return "[Datei nicht gefunden]"
+        try:
+            data = Path(path).read_text(encoding="utf-8", errors="replace")
+            if not data.strip():
+                return "[Datei leer]"
+            obj = json.loads(data)
+            return json.dumps(obj, indent=2, ensure_ascii=False)
+        except json.JSONDecodeError:
+            return data
+        except Exception as ex:
+            return f"[Fehler beim Lesen: {ex}]"
+
+    @staticmethod
+    def _is_sqlite(path: str) -> bool:
+        try:
+            with open(path, "rb") as fh:
+                return fh.read(16) == b"SQLite format 3\x00"
+        except Exception:
+            return False
+
+    def _preview_sqlite(self, path: str, row_limit: int = 25) -> str:
+        try:
+            conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
+            conn.row_factory = sqlite3.Row
+        except sqlite3.Error as ex:
+            return f"[SQLite konnte nicht geöffnet werden: {ex}]"
+        try:
+            tables = [
+                row["name"] if isinstance(row, sqlite3.Row) else row[0]
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            ]
+            if not tables:
+                return "[Keine Tabellen gefunden]"
+            lines = []
+            for table in tables:
+                quoted = '"' + table.replace('"', '""') + '"'
+                lines.append(f"== Tabelle: {table} ==")
+                try:
+                    cols = conn.execute(f"PRAGMA table_info({quoted})").fetchall()
+                    if cols:
+                        col_names = [
+                            (col["name"] if isinstance(col, sqlite3.Row) else col[1])
+                            for col in cols
+                        ]
+                        lines.append("Spalten: " + ", ".join(col_names))
+                except sqlite3.Error as ex:
+                    lines.append(f"[Spalten konnten nicht gelesen werden: {ex}]")
+                try:
+                    rows = conn.execute(f"SELECT * FROM {quoted} LIMIT {row_limit}").fetchall()
+                    if not rows:
+                        lines.append("(Keine Zeilen)")
+                    else:
+                        for row in rows:
+                            if isinstance(row, sqlite3.Row):
+                                lines.append(json.dumps(dict(row), ensure_ascii=False))
+                            else:
+                                lines.append(str(row))
+                        if len(rows) == row_limit:
+                            lines.append(f"... (erste {row_limit} Zeilen)")
+                except sqlite3.Error as ex:
+                    lines.append(f"[Zeilen konnten nicht gelesen werden: {ex}]")
+                lines.append("")
+            return "\n".join(lines).strip()
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def _export_text_widget(self, widget, filename: str):
+        if widget is None:
+            messagebox.showinfo("Export", "Keine Ansicht ausgewählt.")
+            return
+        data = widget.get("1.0","end")
+        if not data.strip():
+            messagebox.showinfo("Export", "Keine Daten im Viewer.")
+            return
+        out = Path(DEFAULT_EXPORT_DIR) / filename
         out.write_text(data, encoding="utf-8", errors="replace")
         messagebox.showinfo("Export", f"Gespeichert: {out}")
 

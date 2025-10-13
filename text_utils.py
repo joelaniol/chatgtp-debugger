@@ -135,7 +135,32 @@ def list_log_files(folder: str) -> List[str]:
     return out
 
 def detect_default_paths() -> dict:
-    paths = {"indexeddb":"", "session":"", "logs":"", "localstorage":""}
+    paths = {
+        "indexeddb": "",
+        "session": "",
+        "logs": "",
+        "localstorage": "",
+        "network": "",
+        "sentry": "",
+        "config": "",
+        "local_state": "",
+        "preferences": "",
+        "crashpad": "",
+        "sharedstorage": "",
+        "quota_manager": "",
+        "dips": "",
+        "privateaggregation": "",
+        "base": "",
+    }
+
+    def try_set_dir(key: str, path: str):
+        if path and not paths.get(key) and os.path.isdir(path):
+            paths[key] = path
+
+    def try_set_file(key: str, path: str):
+        if path and not paths.get(key) and os.path.isfile(path):
+            paths[key] = path
+
     la = os.getenv("LOCALAPPDATA", "")
     ra = os.getenv("APPDATA", "")
     # Microsoft Store App
@@ -145,38 +170,71 @@ def detect_default_paths() -> dict:
         candidates.sort(reverse=True)
         for c in candidates:
             base = os.path.join(store_root, c, "LocalCache", "Roaming", "ChatGPT")
+            if not paths.get("base") and os.path.isdir(base):
+                paths["base"] = base
             idx = os.path.join(base, "IndexedDB")
             ses = os.path.join(base, "Session Storage")
             lg = os.path.join(base, "Logs")
             ls = os.path.join(base, "Local Storage", "leveldb")
+            network_dir = os.path.join(base, "Network")
+            sentry_dir = os.path.join(base, "sentry")
+            crashpad_dir = os.path.join(base, "Crashpad")
+            shared_storage = os.path.join(base, "SharedStorage")
+            webstorage = os.path.join(base, "WebStorage")
+            dips_file = os.path.join(base, "DIPS")
+            private_aggregation = os.path.join(base, "PrivateAggregation")
+
             # choose best indexeddb path
             idx_final = choose_indexeddb(idx)
             if not paths["indexeddb"] and idx_final:
                 paths["indexeddb"] = idx_final
-            if not paths["session"] and os.path.isdir(ses):
-                paths["session"] = ses
-            if not paths["logs"] and os.path.isdir(lg):
-                paths["logs"] = lg
-            if not paths["localstorage"] and os.path.isdir(ls):
-                paths["localstorage"] = ls
-            if all(paths.values()):
+            try_set_dir("session", ses)
+            try_set_dir("logs", lg)
+            try_set_dir("localstorage", ls)
+            try_set_dir("network", network_dir)
+            try_set_dir("sentry", sentry_dir)
+            try_set_dir("crashpad", crashpad_dir)
+            try_set_file("sharedstorage", shared_storage)
+            try_set_file("quota_manager", os.path.join(webstorage, "QuotaManager"))
+            try_set_file("dips", dips_file)
+            try_set_dir("privateaggregation", private_aggregation)
+            try_set_file("config", os.path.join(base, "config.json"))
+            try_set_file("local_state", os.path.join(base, "Local State"))
+            try_set_file("preferences", os.path.join(base, "Preferences"))
+            if all(paths.get(k) for k in ("indexeddb", "session", "logs", "localstorage", "network", "sentry")):
                 break
     # Classic EXE
     classic = os.path.join(ra, "ChatGPT")
     if os.path.isdir(classic):
+        if not paths.get("base"):
+            paths["base"] = classic
         idx2 = os.path.join(classic, "IndexedDB")
         ses2 = os.path.join(classic, "Session Storage")
         lg2 = os.path.join(classic, "Logs")
         ls2 = os.path.join(classic, "Local Storage", "leveldb")
+        network2 = os.path.join(classic, "Network")
+        sentry2 = os.path.join(classic, "sentry")
+        crashpad2 = os.path.join(classic, "Crashpad")
+        shared_storage2 = os.path.join(classic, "SharedStorage")
+        webstorage2 = os.path.join(classic, "WebStorage")
+        dips2 = os.path.join(classic, "DIPS")
+        private_aggregation2 = os.path.join(classic, "PrivateAggregation")
         idx2_final = choose_indexeddb(idx2)
         if not paths["indexeddb"] and idx2_final:
             paths["indexeddb"] = idx2_final
-        if not paths["session"] and os.path.isdir(ses2):
-            paths["session"] = ses2
-        if not paths["logs"] and os.path.isdir(lg2):
-            paths["logs"] = lg2
-        if not paths["localstorage"] and os.path.isdir(ls2):
-            paths["localstorage"] = ls2
+        try_set_dir("session", ses2)
+        try_set_dir("logs", lg2)
+        try_set_dir("localstorage", ls2)
+        try_set_dir("network", network2)
+        try_set_dir("sentry", sentry2)
+        try_set_dir("crashpad", crashpad2)
+        try_set_file("sharedstorage", shared_storage2)
+        try_set_file("quota_manager", os.path.join(webstorage2, "QuotaManager"))
+        try_set_file("dips", dips2)
+        try_set_dir("privateaggregation", private_aggregation2)
+        try_set_file("config", os.path.join(classic, "config.json"))
+        try_set_file("local_state", os.path.join(classic, "Local State"))
+        try_set_file("preferences", os.path.join(classic, "Preferences"))
     return paths
 
 def choose_indexeddb(indexeddb_root: str) -> Optional[str]:
@@ -200,7 +258,23 @@ def choose_indexeddb(indexeddb_root: str) -> Optional[str]:
 
 def autodetect_from_root(root: str) -> dict:
     # Search recursively (depth 5) for patterns
-    found = {"indexeddb":"", "session":"", "logs":"", "localstorage":""}
+    found = {
+        "indexeddb": "",
+        "session": "",
+        "logs": "",
+        "localstorage": "",
+        "network": "",
+        "sentry": "",
+        "config": "",
+        "local_state": "",
+        "preferences": "",
+        "crashpad": "",
+        "sharedstorage": "",
+        "quota_manager": "",
+        "dips": "",
+        "privateaggregation": "",
+        "base": "",
+    }
     if not root or not os.path.isdir(root):
         return found
     max_depth = 5
@@ -210,6 +284,8 @@ def autodetect_from_root(root: str) -> dict:
             dirs[:] = []
             continue
         bn = os.path.basename(cur_root).lower()
+        if not found["base"]:
+            found["base"] = root
         # Logs
         if bn == "logs" and not found["logs"]:
             found["logs"] = cur_root
@@ -219,11 +295,38 @@ def autodetect_from_root(root: str) -> dict:
         # Local Storage leveldb
         if bn == "leveldb" and os.path.basename(os.path.dirname(cur_root)).lower() == "local storage" and not found["localstorage"]:
             found["localstorage"] = cur_root
+        # Network directory
+        if bn == "network" and not found["network"]:
+            found["network"] = cur_root
+        # Sentry directory
+        if bn == "sentry" and not found["sentry"]:
+            found["sentry"] = cur_root
+        # Crashpad directory
+        if bn == "crashpad" and not found["crashpad"]:
+            found["crashpad"] = cur_root
+        # Private Aggregation directory
+        if bn == "privateaggregation" and not found["privateaggregation"]:
+            found["privateaggregation"] = cur_root
         # IndexedDB candidate folders
         if bn.endswith(".indexeddb.leveldb") and not found["indexeddb"]:
             found["indexeddb"] = cur_root
+        # File checks in current directory
+        lowered_files = {f.lower(): os.path.join(cur_root, f) for f in files}
+        if "config.json" in lowered_files and not found["config"]:
+            found["config"] = lowered_files["config.json"]
+        if "local state" in lowered_files and not found["local_state"]:
+            found["local_state"] = lowered_files["local state"]
+        if "preferences" in lowered_files and not found["preferences"]:
+            found["preferences"] = lowered_files["preferences"]
+        if "sharedstorage" in lowered_files and not found["sharedstorage"]:
+            found["sharedstorage"] = lowered_files["sharedstorage"]
+        if "quotaManager".lower() in lowered_files and not found["quota_manager"]:
+            found["quota_manager"] = lowered_files["quotamanager"]
+        if "dips" in lowered_files and not found["dips"]:
+            found["dips"] = lowered_files["dips"]
         # Short-circuit if all found
-        if all(found.values()):
+        essential = ("indexeddb", "session", "logs", "localstorage")
+        if all(found.get(k) for k in essential):
             break
     return found
 
