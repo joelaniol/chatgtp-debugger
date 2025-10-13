@@ -45,6 +45,7 @@ Desktop.ini
 *.local
 *.log
 logs/
+outputs/
 *.secret
 *.secrets
 *.key

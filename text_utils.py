@@ -9,7 +9,16 @@ except Exception:
     chardet = None  # optional
 
 PRINTABLE_ASCII = set(range(32, 127))
-PRINTABLE_WITH_WS = PRINTABLE_ASCII | {9, 10, 13}
+PRINTABLE_WITH_WS = PRINTABLE_ASCII | {9, 10, 11, 12, 13}
+
+def _sanitize_extracted_string(s: str) -> str:
+    # Replace carriage-return variants and control whitespace by readable separators
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    s = s.replace("\t", "    ").replace("\v", "\n").replace("\f", "\n")
+    # Collapse overly long newline runs to keep view compact
+    while "\n\n\n" in s:
+        s = s.replace("\n\n\n", "\n\n")
+    return s.strip()
 
 def safe_read_text(path: str, max_bytes: Optional[int] = None) -> Tuple[str, str]:
     p = Path(path)
@@ -90,7 +99,9 @@ def extract_strings_from_file(path: str, min_len: int = 8, include_utf16le: bool
     for s in strings_all:
         if s not in seen:
             seen.add(s)
-            unique.append(s)
+            cleaned = _sanitize_extracted_string(s)
+            if cleaned:
+                unique.append(cleaned)
     return (total, unique)
 
 def list_candidate_files_in_leveldb(folder: str):
