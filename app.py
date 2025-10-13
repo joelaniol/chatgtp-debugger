@@ -2,7 +2,9 @@ import json
 import os
 import sqlite3
 import threading
+import winreg
 from pathlib import Path
+from typing import List, Optional
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -39,7 +41,22 @@ class InspectorApp(tk.Tk):
         self.quota_manager_file = tk.StringVar(value=defaults.get("quota_manager",""))
         self.dips_file = tk.StringVar(value=defaults.get("dips",""))
         self.privateaggregation_dir = tk.StringVar(value=defaults.get("privateaggregation",""))
+        self.cache_data_dir = tk.StringVar(value=defaults.get("cache_data",""))
+        self.code_cache_dir = tk.StringVar(value=defaults.get("code_cache",""))
+        self.settings_file = tk.StringVar(value=defaults.get("settings",""))
+        self.package_root_dir = tk.StringVar(value=defaults.get("package_root",""))
         self.base_dir = tk.StringVar(value=defaults.get("base",""))
+        self._registry_defs = [
+            ("reg_app_path", "Registry App Path", "HKCU", r"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chatgpt.exe", None, False),
+            ("reg_apphost_indexeddb", "Registry AppHost IndexedDB", "HKCU", r"Software\\Microsoft\\Windows\\CurrentVersion\\AppHost\\IndexedDB", "OpenAI.ChatGPT-Desktop_", True),
+            ("reg_background_access", "Registry BackgroundAccessApplications", "HKCU", r"Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications", "OpenAI.ChatGPT-Desktop_", True),
+            ("reg_capability_microphone", "Registry Capability Microphone", "HKCU", r"Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone", "OpenAI.ChatGPT-Desktop_", True),
+            ("reg_capability_webcam", "Registry Capability Webcam", "HKCU", r"Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\webcam", "OpenAI.ChatGPT-Desktop_", True),
+            ("reg_appmodel_packages", "Registry AppModel Packages", "HKCU", r"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Packages", "OpenAI.ChatGPT-Desktop_", True),
+            ("reg_appcontainer_storage", "Registry AppContainer Storage", "HKCU", r"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppContainer\\Storage", "openai.chatgpt-desktop_", True),
+            ("reg_appmodel_systemdata", "Registry AppModel SystemAppData", "HKCU", r"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\SystemAppData", "OpenAI.ChatGPT-Desktop_", True),
+        ]
+        self.registry_vars = {key: tk.StringVar(value="") for key, *_ in self._registry_defs}
         self.status_var = tk.StringVar(value="Bereit")
 
         # Data caches
@@ -55,6 +72,7 @@ class InspectorApp(tk.Tk):
 
         self._build_ui()
         Path(DEFAULT_EXPORT_DIR).mkdir(exist_ok=True)
+        self._refresh_registry_sources()
         self.auto_find_all(force=True)
 
     def _build_ui(self):
@@ -74,16 +92,32 @@ class InspectorApp(tk.Tk):
 
         summary = ttk.Frame(top); summary.pack(fill="x", pady=(4,4))
         ttk.Label(summary, text="Gefundene Quellen:").pack(anchor="w")
-        summary_grid = ttk.Frame(summary)
-        summary_grid.pack(fill="x", pady=(2,0))
-        summary_grid.columnconfigure(1, weight=1)
+
+        stats_row = ttk.Frame(summary); stats_row.pack(fill="x", pady=(2,0))
+        self.summary_found_var = tk.StringVar(value="Gefunden: 0")
+        self.summary_missing_var = tk.StringVar(value="Nicht gefunden: 0")
+        ttk.Label(stats_row, textvariable=self.summary_found_var, foreground="#1f7f37").pack(side="left")
+        ttk.Label(stats_row, textvariable=self.summary_missing_var, foreground="#b32424", padx=12).pack(side="left")
+        self.summary_toggle_button = ttk.Button(
+            stats_row,
+            text="Details anzeigen",
+            command=self.toggle_summary_details
+        )
+        self.summary_toggle_button.pack(side="left")
+
+        self.summary_details_frame = ttk.Frame(summary)
+        self.summary_details_frame.pack(fill="x", pady=(2,0))
+        self.summary_details_frame.columnconfigure(1, weight=1)
 
         self.path_summary_labels = {}
         for idx, (key, label, var) in enumerate(self._path_summary_items()):
-            ttk.Label(summary_grid, text=f"{label}:").grid(row=idx, column=0, sticky="w", padx=(0,6), pady=1)
-            status_label = tk.Label(summary_grid, text="-", anchor="w")
+            ttk.Label(self.summary_details_frame, text=f"{label}:").grid(row=idx, column=0, sticky="w", padx=(0,6), pady=1)
+            status_label = tk.Label(self.summary_details_frame, text="-", anchor="w")
             status_label.grid(row=idx, column=1, sticky="w", pady=1)
             self.path_summary_labels[key] = status_label
+
+        self.summary_details_visible = True
+        self.toggle_summary_details(force=False)
 
         controls = ttk.Frame(top); controls.pack(fill="x", pady=(4,0))
         ttk.Button(controls, text="Erweiterte Pfade ...", command=self.open_path_manager).pack(side="left")
@@ -118,6 +152,9 @@ class InspectorApp(tk.Tk):
         self.tab_storage = ttk.Frame(self.nb); self.nb.add(self.tab_storage, text="Speicher (SQLite)")
         self._build_tab_structured(self.tab_storage, which="storage")
 
+        self.tab_registry = ttk.Frame(self.nb); self.nb.add(self.tab_registry, text="Registrierung")
+        self._build_tab_structured(self.tab_registry, which="registry")
+
         # Status bar
         sb = ttk.Frame(self); sb.pack(fill="x")
         ttk.Label(sb, textvariable=self.status_var, anchor="w").pack(fill="x")
@@ -127,7 +164,7 @@ class InspectorApp(tk.Tk):
         self._update_path_summary()
 
     def _path_entries(self):
-        return [
+        entries = [
             ("logs", "Logs", self.logs_dir, "dir"),
             ("indexeddb", "IndexedDB", self.indexeddb_dir, "dir"),
             ("session", "Session Storage", self.session_dir, "dir"),
@@ -142,12 +179,21 @@ class InspectorApp(tk.Tk):
             ("quota_manager", "QuotaManager", self.quota_manager_file, "file"),
             ("dips", "DIPS", self.dips_file, "file"),
             ("privateaggregation", "PrivateAggregation", self.privateaggregation_dir, "dir"),
+            ("cache_data", "Cache Data", self.cache_data_dir, "dir"),
+            ("code_cache", "Code Cache", self.code_cache_dir, "dir"),
+            ("settings", "settings.dat", self.settings_file, "file"),
+            ("package_root", "Package Root", self.package_root_dir, "dir"),
         ]
+        for key, label, *_rest in self._registry_defs:
+            entries.append((key, label, self.registry_vars[key], "registry"))
+        return entries
 
     def _path_summary_items(self):
         return [(key, label, var) for key, label, var, _ in self._path_entries()]
 
     def _update_path_summary(self):
+        found = 0
+        missing = 0
         for key, label, var, _kind in self._path_entries():
             summary_lbl = self.path_summary_labels.get(key)
             if not summary_lbl:
@@ -155,8 +201,36 @@ class InspectorApp(tk.Tk):
             path = var.get().strip()
             if path:
                 summary_lbl.config(text="Gefunden", fg="#1f7f37")
+                found += 1
             else:
                 summary_lbl.config(text="Nicht gefunden", fg="#b32424")
+                missing += 1
+        if hasattr(self, "summary_found_var"):
+            self.summary_found_var.set(f"Gefunden: {found}")
+        if hasattr(self, "summary_missing_var"):
+            self.summary_missing_var.set(f"Nicht gefunden: {missing}")
+
+    def _refresh_registry_sources(self):
+        for key, _label, root_name, base_path, pattern, multi in self._registry_defs:
+            matches = self._list_registry_matches(root_name, base_path, pattern, multi)
+            value = matches[0] if matches else ""
+            self.registry_vars[key].set(value)
+        self._update_path_summary()
+
+    def toggle_summary_details(self, force: Optional[bool] = None):
+        show = not getattr(self, "summary_details_visible", False)
+        if force is not None:
+            show = force
+        if show:
+            self.summary_details_frame.pack(fill="x", pady=(2,0))
+            self.summary_toggle_button.config(text="Details ausblenden")
+            self.summary_details_visible = True
+        else:
+            self.summary_details_frame.pack_forget()
+            self.summary_toggle_button.config(text="Details anzeigen")
+            self.summary_details_visible = False
+        # ensure counters stay accurate
+        self._update_path_summary()
 
     def open_path_manager(self):
         if hasattr(self, "_paths_dialog") and self._paths_dialog.winfo_exists():
@@ -173,6 +247,10 @@ class InspectorApp(tk.Tk):
         for key, label, var, kind in self._path_entries():
             row = ttk.Frame(body); row.pack(fill="x", pady=2)
             ttk.Label(row, text=f"{label}:").pack(side="left")
+            if kind == "registry":
+                entry = ttk.Entry(row, textvariable=var, width=70, state="readonly")
+                entry.pack(side="left", fill="x", expand=True, padx=6)
+                continue
             entry = ttk.Entry(row, textvariable=var, width=70)
             entry.pack(side="left", fill="x", expand=True, padx=6)
             entry.bind("<Return>", lambda _e: self._on_paths_changed(rescan=True))
@@ -194,6 +272,8 @@ class InspectorApp(tk.Tk):
             self.scan_all()
 
     def _choose_path(self, var, on_change=None, kind="dir"):
+        if kind == "registry":
+            return
         if kind == "file":
             p = filedialog.askopenfilename(title="Datei auswaehlen")
         else:
@@ -207,6 +287,7 @@ class InspectorApp(tk.Tk):
         self._choose_path(var, on_change=on_change, kind="dir")
 
     def scan_all(self):
+        self._refresh_registry_sources()
         self.scan_logs()
         self.scan_indexeddb()
         self.scan_session()
@@ -214,6 +295,7 @@ class InspectorApp(tk.Tk):
         self.scan_structured("network")
         self.scan_structured("config")
         self.scan_structured("storage")
+        self.scan_structured("registry")
         self.scan_telemetry()
 
     def auto_find_all(self, force=False):
@@ -240,7 +322,7 @@ class InspectorApp(tk.Tk):
         maybe_set(self.dips_file, "dips")
         maybe_set(self.privateaggregation_dir, "privateaggregation")
         maybe_set(self.base_dir, "base")
-        self._update_path_summary()
+        self._refresh_registry_sources()
         self.status_var.set(
             "Auto-Erkennung: "
             f"Logs={bool(found.get('logs'))}, "
@@ -659,7 +741,7 @@ class InspectorApp(tk.Tk):
         if idx < 0 or idx >= len(files):
             return
         record = files[idx]
-        content = self._preview_file(record["path"])
+        content = self._preview_structured_entry(record)
         text = view["text"]
         text.delete("1.0","end")
         text.insert("1.0", content)
@@ -705,13 +787,27 @@ class InspectorApp(tk.Tk):
             pa_dir = self.privateaggregation_dir.get().strip()
             if pa_dir:
                 self._add_structured_item(items, "PrivateAggregation", pa_dir, allow_directory=True)
+        elif which == "registry":
+            for key, base_label, root_name, base_path, pattern, multi in self._registry_defs:
+                matches = self._list_registry_matches(root_name, base_path, pattern, multi)
+                if not matches:
+                    continue
+                if multi and len(matches) > 1:
+                    for full in matches:
+                        suffix = full.split('\\')[-1]
+                        self._add_structured_item(items, f"{base_label}: {suffix}", full, kind="registry")
+                else:
+                    self._add_structured_item(items, base_label, matches[0], kind="registry")
         return items
 
-    def _add_structured_item(self, items, label: str, path: str, allow_directory: bool = False):
+    def _add_structured_item(self, items, label: str, path: str, allow_directory: bool = False, kind: str = "file"):
         if not path:
             return
+        if kind == "registry":
+            items.append({"label": label, "path": path, "kind": "registry"})
+            return
         if os.path.isfile(path):
-            items.append({"label": label, "path": path})
+            items.append({"label": label, "path": path, "kind": "file"})
         elif allow_directory and os.path.isdir(path):
             try:
                 entries = sorted(os.listdir(path))
@@ -720,7 +816,13 @@ class InspectorApp(tk.Tk):
             for name in entries:
                 sub_path = os.path.join(path, name)
                 if os.path.isfile(sub_path):
-                    items.append({"label": f"{label}/{name}", "path": sub_path})
+                    items.append({"label": f"{label}/{name}", "path": sub_path, "kind": "file"})
+
+    def _preview_structured_entry(self, record: dict) -> str:
+        kind = record.get("kind", "file")
+        if kind == "registry":
+            return self._preview_registry(record.get("path", ""))
+        return self._preview_file(record.get("path", ""))
 
     def _preview_file(self, path: str) -> str:
         if not path or not os.path.exists(path):
@@ -738,6 +840,87 @@ class InspectorApp(tk.Tk):
             return f"[encoding={enc}]\n{content}"
         except Exception as ex:
             return f"[Fehler beim Lesen: {ex}]"
+
+    def _preview_registry(self, path: str) -> str:
+        if not path:
+            return "[Registry-Key nicht gefunden]"
+        parts = path.split("\\", 1)
+        if len(parts) != 2:
+            return "[Ungueltiger Registry-Pfad]"
+        root = self._registry_roots().get(parts[0].upper())
+        if not root:
+            return "[Unbekannter Registry-Root]"
+        sub_path = parts[1]
+        try:
+            with winreg.OpenKey(root, sub_path, 0, winreg.KEY_READ) as key:
+                info = winreg.QueryInfoKey(key)
+                lines = [f"[{path}]", ""]
+                for idx in range(info[1]):
+                    value_name, value_data, value_type = winreg.EnumValue(key, idx)
+                    value_name = value_name or "(Default)"
+                    lines.append(f"{value_name} = {value_data!r} ({self._registry_type_name(value_type)})")
+                if info[0]:
+                    lines.append("")
+                    lines.append("Subkeys:")
+                    for idx in range(info[0]):
+                        sub = winreg.EnumKey(key, idx)
+                        lines.append(f"  {sub}")
+                return "\n".join(lines) if lines else "[Keine Werte]"
+        except FileNotFoundError:
+            return "[Registry-Key nicht gefunden]"
+        except OSError as ex:
+            return f"[Fehler beim Lesen: {ex}]"
+
+    @staticmethod
+    def _registry_roots() -> dict:
+        return {
+            "HKCU": winreg.HKEY_CURRENT_USER,
+            "HKLM": winreg.HKEY_LOCAL_MACHINE,
+            "HKCR": winreg.HKEY_CLASSES_ROOT,
+            "HKU": winreg.HKEY_USERS,
+            "HKCC": winreg.HKEY_CURRENT_CONFIG,
+        }
+
+    @staticmethod
+    def _registry_type_name(value_type: int) -> str:
+        mapping = {
+            winreg.REG_SZ: "REG_SZ",
+            winreg.REG_EXPAND_SZ: "REG_EXPAND_SZ",
+            winreg.REG_BINARY: "REG_BINARY",
+            winreg.REG_DWORD: "REG_DWORD",
+            winreg.REG_QWORD: "REG_QWORD",
+            winreg.REG_MULTI_SZ: "REG_MULTI_SZ",
+            winreg.REG_NONE: "REG_NONE",
+        }
+        return mapping.get(value_type, f"TYPE_{value_type}")
+
+    def _list_registry_matches(self, root_name: str, base_path: str, pattern: Optional[str], multi: bool) -> List[str]:
+        roots = self._registry_roots()
+        root = roots.get(root_name.upper())
+        if not root:
+            return []
+        try:
+            with winreg.OpenKey(root, base_path, 0, winreg.KEY_READ) as key:
+                if pattern:
+                    matches: List[str] = []
+                    info = winreg.QueryInfoKey(key)
+                    pattern_lower = pattern.lower()
+                    for idx in range(info[0]):
+                        sub = winreg.EnumKey(key, idx)
+                        sub_lower = sub.lower()
+                        if multi:
+                            if sub_lower.startswith(pattern_lower):
+                                matches.append(f"{root_name}\\{base_path}\\{sub}")
+                        else:
+                            if sub_lower == pattern_lower or sub_lower.startswith(pattern_lower):
+                                matches.append(f"{root_name}\\{base_path}\\{sub}")
+                    matches.sort(reverse=True)
+                    return matches
+                return [f"{root_name}\\{base_path}"]
+        except FileNotFoundError:
+            return []
+        except OSError:
+            return []
 
     def _read_json_pretty(self, path: str) -> str:
         if not path or not os.path.isfile(path):
@@ -762,6 +945,11 @@ class InspectorApp(tk.Tk):
             return False
 
     def _preview_sqlite(self, path: str, row_limit: int = 25) -> str:
+        lock_suffixes = ["-journal", "-wal", "-shm"]
+        active_locks = [p for p in (path + suffix for suffix in lock_suffixes) if os.path.exists(p)]
+        if active_locks:
+            names = ", ".join(os.path.basename(p) for p in active_locks) or "Lock-Dateien"
+            return f"[SQLite gesperrt ({names}). Bitte Anwendung schliessen und erneut versuchen.]"
         try:
             conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
             conn.row_factory = sqlite3.Row
@@ -924,6 +1112,55 @@ class InspectorApp(tk.Tk):
                     elif not found_any:
                         report_lines.append("(keine Treffer)\n\n")
 
+                def search_strings_in_files(title: str, paths, use_extract: bool, max_mb: int = 8):
+                    paths = list(paths)
+                    report_lines.append(f"{title}\n")
+                    if not paths:
+                        report_lines.append("(keine Dateien gefunden)\n\n")
+                        return
+                    hits_found = False
+                    for path in paths:
+                        path_str = str(path)
+                        try:
+                            if use_extract:
+                                _, strings = extract_strings_from_file(path_str, min_len=8, include_utf16le=True, max_mb=max_mb)
+                                hits = search_lines(strings, DEFAULT_MCP_PATTERNS)
+                            else:
+                                _enc, content = safe_read_text(path_str, max_bytes=2 * 1024 * 1024)
+                                hits = search_lines(content.splitlines(), DEFAULT_MCP_PATTERNS)
+                        except Exception as ex:
+                            report_lines.append(f"-- {os.path.basename(path_str)}: Fehler {ex}\n\n")
+                            continue
+                        report_lines.append(f"-- {os.path.basename(path_str)}: {len(hits)} Treffer\n")
+                        if hits:
+                            hits_found = True
+                            report_lines.extend([h + "\n" for h in hits[:200]])
+                        report_lines.append("\n")
+                    if not hits_found:
+                        report_lines.append("(keine Treffer)\n\n")
+
+                cache_dir = self.cache_data_dir.get().strip()
+                if cache_dir and os.path.isdir(cache_dir):
+                    data_paths = sorted(
+                        Path(cache_dir).glob("data*"),
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True
+                    )[:8]
+                    search_strings_in_files("[CACHE DATA - Strings]", data_paths, use_extract=True, max_mb=8)
+                else:
+                    report_lines.append("[CACHE DATA - Strings]\n(Verzeichnis nicht gefunden)\n\n")
+
+                code_dir = self.code_cache_dir.get().strip()
+                if code_dir and os.path.isdir(code_dir):
+                    js_paths = sorted(
+                        Path(code_dir).rglob("*.js"),
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True
+                    )[:20]
+                    search_strings_in_files("[CODE CACHE - Text]", js_paths, use_extract=False)
+                else:
+                    report_lines.append("[CODE CACHE - Text]\n(Verzeichnis nicht gefunden)\n\n")
+
                 network_dir = self.network_dir.get().strip()
                 if network_dir and os.path.isdir(network_dir):
                     add_file_group(
@@ -972,3 +1209,5 @@ class InspectorApp(tk.Tk):
 if __name__ == "__main__":
     app = InspectorApp()
     app.mainloop()
+
+

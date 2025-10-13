@@ -10,6 +10,8 @@ Desktop-Tool zum schnellen Auslesen der lokalen ChatGPT-Desktop-Datenbanken unte
 - Kompakte Pfad-Uebersicht mit Statusanzeige; manuelle Anpassungen erfolgen ueber den Button `Erweiterte Pfade ...`.
 - Telemetry-Tab aggregiert Sentry-Session/Queue sowie Crashpad-Hinweise.
 - Netzwerk-, Konfig- und Speicher-Tabs liefern JSON-Pretty-Print und schreibgeschuetzte SQLite-Vorschauen (Cookies, Trust Tokens, QuotaManager, SharedStorage, DIPS, PrivateAggregation).
+- Registry-Viewer (read-only) zeigt relevante Windows-Schluessel der ChatGPT-Desktop-App.
+- Chromium-Caches (`Cache_Data`, `Code Cache`) werden erkannt und bei der automatischen Suche auf MCP-Hinweise analysiert.
 - MCP Auto-Suche, die relevante Hinweise in allen Quellen zusammenfasst (`outputs/mcp_report.txt`).
 - Export der angezeigten Strings in Textdateien.
 
@@ -39,6 +41,7 @@ Falls `py` nicht verfuegbar ist, stattdessen `python` verwenden. Fuer UTF-8-Ausg
 - **Root (optional):** Basisordner fuer die automatische Suche. `Auto finden (alle)` stoesst eine komplette Neu-Detektion an, `Neu laden (alle)` scannt die aktuellen Pfade erneut. `Root waehlen` aktualisiert den Pfad sofort.
 - **Tabs:** Logs, IndexedDB, Session Storage und Local Storage liefern Text- und String-Ansichten; laengere Operationen laufen in separaten Threads.
 - **Telemetry / Netzwerk / Konfiguration / Speicher:** Neue Viewer fuer Sentry, Crashpad, Netzwerk-Dateien (HTTP/QUIC, Cookies), Konfigurationsdateien (config.json, Preferences) sowie SQLite-basierte Speicher (QuotaManager, SharedStorage, DIPS, PrivateAggregation) mit schreibgeschuetzter Vorschau.
+- **Registrierung (read-only):** Zeigt zentrale Windows-Schluessel der ChatGPT-Desktop-App an; es werden keine Werte geschrieben.
 - **Automatisches Strings-Scanning:** Beim Anklicken einer Binaerdatei startet die Extraktion automatisch (ASCII, UTF-16LE). Der Button `Strings erneut scannen` wiederholt den Vorgang mit angepassten Parametern.
 - **Export:** Speichert den aktuellen Inhalt des jeweiligen Viewers unter `outputs/<dateiname>.strings.txt`.
 
@@ -54,6 +57,8 @@ Falls `py` nicht verfuegbar ist, stattdessen `python` verwenden. Fuer UTF-8-Ausg
   - `IndexedDB/<site>.indexeddb.leveldb`
   - `Session Storage`
   - `Local Storage/leveldb`
+  - `Cache/Cache_Data`
+  - `Code Cache`
   - `Network` (u. a. `Network Persistent State`, `TransportSecurity`, `Cookies`, `Trust Tokens`)
   - `sentry/` (Session/Queue)
   - `Crashpad/` (Reports/Attachments)
@@ -65,6 +70,7 @@ Falls `py` nicht verfuegbar ist, stattdessen `python` verwenden. Fuer UTF-8-Ausg
 - **Leere Tabs:** Pfade pruefen oder `Auto finden (alle)`/`Neu laden (alle)` ausfuehren.
 - **Keine Python-Installation:** Offizielle Python-Version installieren (https://www.python.org/downloads/) und waehrend des Setups `Add Python to PATH` aktivieren.
 - **Unicode-Artefakte:** Ausgabe erfolgt UTF-8-basiert. Falls Zeichen falsch angezeigt werden, sicherstellen, dass das Terminal bzw. die Ziel-Datei UTF-8 unterstuetzt.
+- **SQLite gesperrt:** Wenn die Vorschau meldet, dass Lock-Dateien (`-wal`, `-journal`, `-shm`) vorhanden sind, die ChatGPT-Desktop-App schliessen und nach einigen Sekunden erneut versuchen.
 
 ## Lizenz
 Keine Lizenz hinterlegt - vor Nutzung oder Verteilung bitte mit dem Projektinhaber klaeren.

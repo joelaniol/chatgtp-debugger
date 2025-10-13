@@ -225,6 +225,10 @@ def detect_default_paths() -> dict:
         "quota_manager": "",
         "dips": "",
         "privateaggregation": "",
+        "cache_data": "",
+        "code_cache": "",
+        "settings": "",
+        "package_root": "",
         "base": "",
     }
 
@@ -276,6 +280,16 @@ def detect_default_paths() -> dict:
             try_set_file("config", os.path.join(base, "config.json"))
             try_set_file("local_state", os.path.join(base, "Local State"))
             try_set_file("preferences", os.path.join(base, "Preferences"))
+            try_set_dir("cache_data", os.path.join(base, "Cache", "Cache_Data"))
+            try_set_dir("code_cache", os.path.join(base, "Code Cache"))
+            if os.path.isdir(base):
+                try:
+                    package_root = Path(base).parent.parent.parent
+                except ValueError:
+                    package_root = None
+                if package_root and package_root.exists():
+                    try_set_dir("package_root", str(package_root))
+                    try_set_file("settings", str(package_root / "Settings" / "settings.dat"))
             if all(paths.get(k) for k in ("indexeddb", "session", "logs", "localstorage", "network", "sentry")):
                 break
     # Classic EXE
@@ -310,6 +324,22 @@ def detect_default_paths() -> dict:
         try_set_file("config", os.path.join(classic, "config.json"))
         try_set_file("local_state", os.path.join(classic, "Local State"))
         try_set_file("preferences", os.path.join(classic, "Preferences"))
+        try_set_dir("cache_data", os.path.join(classic, "Cache", "Cache_Data"))
+        try_set_dir("code_cache", os.path.join(classic, "Code Cache"))
+        try_set_file("settings", os.path.join(classic, "Settings", "settings.dat"))
+        try_set_dir("package_root", classic)
+
+    if paths.get("base"):
+        base_path = Path(paths["base"])
+        try:
+            package_root = base_path.parent.parent.parent
+        except ValueError:
+            package_root = None
+        if package_root and package_root.exists():
+            try_set_dir("package_root", str(package_root))
+            try_set_file("settings", str(package_root / "Settings" / "settings.dat"))
+        try_set_dir("cache_data", os.path.join(paths["base"], "Cache", "Cache_Data"))
+        try_set_dir("code_cache", os.path.join(paths["base"], "Code Cache"))
     return paths
 
 def choose_indexeddb(indexeddb_root: str) -> Optional[str]:
